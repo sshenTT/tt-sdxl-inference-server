@@ -284,13 +284,13 @@ class TTSDXLRunner:
         B, C, H, W = self.latents.shape
 
         # All device code will work with channel last tensors
-        latents = torch.permute(self.latents, (0, 2, 3, 1))
-        latents = latents.reshape(1, 1, B * H * W, C)
+        self.latents = torch.permute(self.latents, (0, 2, 3, 1))
+        self.latents = self.latents.reshape(1, 1, B * H * W, C)
 
-        self.latents_clone = latents.clone()
+        self.latents_clone = self.latents.clone()
 
-        latents = ttnn.from_torch(
-            latents,
+        self.latents = ttnn.from_torch(
+            self.latents,
             dtype=ttnn.bfloat16,
             device=self.device,
             layout=ttnn.TILE_LAYOUT,
@@ -299,7 +299,7 @@ class TTSDXLRunner:
         )
 
         # UNet will deallocate the input tensor
-        latent_model_input = ttnn.clone(latents)
+        latent_model_input = ttnn.clone(self.latents)
 
         self.logger.info("Performing warmup run, to make use of program caching in actual inference...")
         run_tt_image_gen(
@@ -372,9 +372,9 @@ class TTSDXLRunner:
                 img.save(f"output/output{len(images) + self.start_from}.png")
                 self.logger.info(f"Image saved to output/output{len(images) + start_from}.png")
 
-            latents = self.latents_clone.clone()
-            latents = ttnn.from_torch(
-                latents,
+            self.latents = self.latents_clone.clone()
+            self.latents = ttnn.from_torch(
+                self.latents,
                 dtype=ttnn.bfloat16,
                 device=self.device,
                 layout=ttnn.TILE_LAYOUT,

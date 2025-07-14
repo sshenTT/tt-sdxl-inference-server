@@ -22,4 +22,9 @@ ENVIRONMENT - production / development
  4. Add uts
  5. add api tests
  6. Add api authentication
+ 7. Cleanup unused things in runers
+ 8. Do not allow inferencing until model is ready
+ 9. Put device specific things into a runner
+ 10. Use tt metal logger
+ 11. Use tt metal benchmark
  
