@@ -4,6 +4,7 @@ import time
 from fastapi import HTTPException
 from domain.image_generate_request import ImageGenerateRequest, ImageGenerateTask
 from model_services.base_model import BaseModel
+from tt_model_runners.sdxl_runner import TTSDXLRunner
 from utils.image_manager import ImageManager
 from utils.logger import TTLogger
 
@@ -13,12 +14,15 @@ class SDXLService(BaseModel):
     imageManager = None
     maxWorkerSize = 3
     task_queue = None
+    tt_sdxl_runner = None
 
     def __init__(self):
         self.logger = TTLogger()
         self.imageManager = ImageManager("img")
         # init queue
         self.task_queue = asyncio.Queue(self.maxWorkerSize)
+        # init sdxl runner
+        self.tt_sdxl_runner = TTSDXLRunner()
         # run queue worker async
 
     async def processImage(self, imageGenerateRequest: ImageGenerateRequest) -> str:
@@ -28,6 +32,9 @@ class SDXLService(BaseModel):
         generateImageTask = ImageGenerateTask.from_request(imageGenerateRequest)
         taskCompletionSignal = await self.addTask(generateImageTask)
         # TODO await completion
+        # TODO add adding and handling withn a queue, this is a shortcut
+        self.tt_sdxl_runner.runInference([imageGenerateRequest.prompt])
+        # TODO add adding and handling withn a queue, this is a shortcut
         # await taskCompletionSignal
         end = time.perf_counter()
 
@@ -44,6 +51,9 @@ class SDXLService(BaseModel):
         if (self.isReady == False):
             self.isReady = True
         end = time.perf_counter()
+        device_params = {"l1_small_size": 57344}
+        self.tt_sdxl_runner.mesh_device(device_params, {})
+        asyncio.create_task(self.tt_sdxl_runner.load_model())
         self.logger.logTime(start, end, "Model loaded:")
         return True
 
