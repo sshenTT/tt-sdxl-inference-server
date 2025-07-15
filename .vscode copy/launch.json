@@ -1,0 +1,41 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python C++ Debug", // Configuration used by the extension
+            "type": "pythoncpp",
+            "request": "launch",
+            "pythonLaunchName": "Python Debug",
+            "cppAttachName": "(gdb) Attach",
+        },
+        {
+            "name": "Python Debug", // Notice that this is `pythonLaunchName` in the above configuration
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "tests/ttnn/integration_tests/yolov4/test_ttnn_yolov4.py::test_yolov4[0-pretrained_weight_false-0]"
+            ],
+            "env": {
+                "ARCH_NAME": "wormhole_b0",
+                "TT_METAL_HOME": "${workspaceFolder}",
+                "WH_ARCH_YAML": "wormhole_b0_80_arch_eth_dispatch.yaml", // Required when running a single-chip app on n300 
+            }
+        },
+        {
+            "name": "(gdb) Attach", // Notice that this is `cppAttachName` in the `Python C++ Debug` configuration
+            "type": "cppdbg",
+            "request": "attach",
+            "program": "${workspaceFolder}/python_env/bin/python",
+            "processId": "${command:pickProcess}",
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        }
+    ]
+}

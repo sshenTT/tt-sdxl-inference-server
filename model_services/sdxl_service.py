@@ -33,7 +33,7 @@ class SDXLService(BaseModel):
         taskCompletionSignal = await self.addTask(generateImageTask)
         # TODO await completion
         # TODO add adding and handling withn a queue, this is a shortcut
-        self.tt_sdxl_runner.runInference([imageGenerateRequest.prompt])
+        asyncio.wait_for(self.tt_sdxl_runner.runInference([imageGenerateRequest.prompt]), timeout=20)
         # TODO add adding and handling withn a queue, this is a shortcut
         # await taskCompletionSignal
         end = time.perf_counter()
@@ -45,19 +45,36 @@ class SDXLService(BaseModel):
 
     async def warmupModel(self):
         # run worker
-        asyncio.create_task(self.runWorker())
+        asyncio.create_task(self.createAsyncReservations())
+        # asyncio.to_thread(self.runWorker())
         start = time.perf_counter()
-        # TODO load model
-        if (self.isReady == False):
-            self.isReady = True
         end = time.perf_counter()
-        device_params = {"l1_small_size": 57344}
-        self.tt_sdxl_runner.mesh_device(device_params, {})
-        asyncio.create_task(self.tt_sdxl_runner.load_model())
+
+        print("Loading model!!!!!!!")
+        # asyncio.to_thread(self.tt_sdxl_runner.load_model())
         self.logger.logTime(start, end, "Model loaded:")
         return True
 
+    async def createAsyncReservations(self):
+        print("Deploying worker and starting model warmup")
+        await asyncio.to_thread(self.run_model_warmup_in_thread)
+        await asyncio.to_thread(self.run_worker_in_thread)
+
+    def run_worker_in_thread(self):
+        import asyncio
+        print("Running worker in thread")
+        asyncio.run(self.runWorker())
+
+    def run_model_warmup_in_thread(self):
+        import asyncio
+        print("Running model warmup in thread")
+        device_params = {"l1_small_size": 57344}
+        # self.tt_sdxl_runner.mesh_device(device_params, {})
+        asyncio.run(self.tt_sdxl_runner.load_model(device_params, {}))
+        self.isReady = True
+
     def isModelReady(self) -> bool:
+        self.tt_sdxl_runner.one_step_inference()
         return self.isReady
 
     def checkIsModelReady(self):

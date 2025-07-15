@@ -9,12 +9,31 @@
       "args": [
         "main:app",        // Replace with your actual module path
         "--reload",
-        "--port", "8000"
+        "--port", "9000",
+        "--workers", "12"
       ],
-      "env": {
-        "ENVIRONMENT": "development"
-      },
+        "env": {
+            "ARCH_NAME": "wormhole_b0",
+            "ENVIRONMENT": "development",
+            "PYTHONPATH": "/opt/venv/bin/python3",
+            "TT_METAL_HOME": "/proj_sw/user_dev/idjuric/tt-metal",
+            "WH_ARCH_YAML": "wormhole_b0_80_arch_eth_dispatch.yaml", // Required when running a single-chip app on n300 
+        },
       "console": "integratedTerminal"
+    },
+    {
+        "name": "Python Debug", // Notice that this is `pythonLaunchName` in the above configuration
+        "type": "debugpy",
+        "request": "launch",
+        "module": "pytest",
+        "args": [
+            "tests/ttnn/integration_tests/yolov4/test_ttnn_yolov4.py::test_yolov4[0-pretrained_weight_false-0]"
+        ],
+        "env": {
+            "ARCH_NAME": "wormhole_b0",
+            "TT_METAL_HOME": "${workspaceFolder}",
+            "WH_ARCH_YAML": "wormhole_b0_80_arch_eth_dispatch.yaml", // Required when running a single-chip app on n300 
+        }
     }
   ]
 }
