@@ -1,4 +1,5 @@
 import base64
+from io import BytesIO
 from fastapi import HTTPException, Path, UploadFile
 
 
@@ -26,10 +27,16 @@ class ImageManager:
         file_path.unlink()
         return True
     
-    def base64ConvertImage(self, filename: str):
+    def convertImageFromFileToBase64(self, filename: str):
         file_path = self.get_image_path(filename)
         with open(file_path, "rb") as image_file:
             encoded_bytes = base64.b64encode(image_file.read())
             encoded_string = encoded_bytes.decode("utf-8")
 
         return encoded_string
+
+    def convertImageToBytes(self, image):
+        buffered = BytesIO()
+        image.save(buffered, format="PNG")
+        img_bytes = buffered.getvalue()
+        return img_bytes

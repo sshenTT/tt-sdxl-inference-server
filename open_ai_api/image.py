@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from domain.image_generate_request import ImageGenerateRequest
 from domain.output_format import OutputFormat
@@ -11,7 +12,8 @@ router = APIRouter()
 
 @router.post('/generations')
 async def generateImage(imageGenerateRequest: ImageGenerateRequest, service: BaseModel = Depends(model_resolver)):
-    return await service.processImage(imageGenerateRequest)
+    image_bytes = await run_in_threadpool(service.processImage, imageGenerateRequest)
+    return Response(content=image_bytes, media_type="image/png")
 
 ### 📤 Download Endpoint
 @router.get("/download/{filename}")

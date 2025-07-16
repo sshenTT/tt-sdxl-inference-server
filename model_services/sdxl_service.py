@@ -2,7 +2,7 @@ import asyncio
 import time
 
 from fastapi import HTTPException
-from domain.image_generate_request import ImageGenerateRequest, ImageGenerateTask
+from domain.image_generate_request import ImageGenerateRequest
 from model_services.base_model import BaseModel
 from tt_model_runners.sdxl_runner import TTSDXLRunner
 from utils.image_manager import ImageManager
@@ -25,23 +25,21 @@ class SDXLService(BaseModel):
         self.tt_sdxl_runner = TTSDXLRunner()
         # run queue worker async
 
-    async def processImage(self, imageGenerateRequest: ImageGenerateRequest) -> str:
+    def processImage(self, imageGenerateRequest: ImageGenerateRequest) -> str:
         self.checkIsModelReady()
         start = time.perf_counter()
-        ImageGenerateTask.model_construct()
-        generateImageTask = ImageGenerateTask.from_request(imageGenerateRequest)
-        taskCompletionSignal = await self.addTask(generateImageTask)
+        # ImageGenerateTask.model_construct()
+        # generateImageTask = ImageGenerateTask.from_request(imageGenerateRequest)
+        # taskCompletionSignal = await self.addTask(generateImageTask)
         # TODO await completion
         # TODO add adding and handling withn a queue, this is a shortcut
-        asyncio.wait_for(self.tt_sdxl_runner.runInference([imageGenerateRequest.prompt]), timeout=20)
+        images = self.tt_sdxl_runner.runInference(imageGenerateRequest.prompt, imageGenerateRequest.num_inference_step)
         # TODO add adding and handling withn a queue, this is a shortcut
         # await taskCompletionSignal
         end = time.perf_counter()
 
-        image = self.imageManager.base64ConvertImage("tenstorrent_logo.jpg")
-
         self.logger.logTime(start, end, "Inference time:")
-        return image
+        return self.imageManager.convertImageToBytes(images[0])
 
     async def warmupModel(self):
         # run worker
@@ -68,13 +66,11 @@ class SDXLService(BaseModel):
     def run_model_warmup_in_thread(self):
         import asyncio
         print("Running model warmup in thread")
-        device_params = {"l1_small_size": 57344}
         # self.tt_sdxl_runner.mesh_device(device_params, {})
-        asyncio.run(self.tt_sdxl_runner.load_model(device_params, {}))
+        asyncio.run(self.tt_sdxl_runner.load_model())
         self.isReady = True
 
     def isModelReady(self) -> bool:
-        self.tt_sdxl_runner.one_step_inference()
         return self.isReady
 
     def checkIsModelReady(self):

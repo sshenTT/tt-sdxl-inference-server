@@ -29,81 +29,58 @@ class TTSDXLRunner:
     guidance_scale = 5.0
     scaling_factor = None
     tt_vae = None
-    needed_padding = False
     pipeline = None
-    latents_clone = None
     latents = None
 
     def __init__(self):
         pass
         self.logger = TTLogger()
 
-    def warmup_device(self, device_params, request):
-        print ('hello world')
+    def _set_fabric(self,fabric_config):
+        # If fabric_config is not None, set it to fabric_config
+        if fabric_config:
+            ttnn.set_fabric_config(fabric_config)
 
+    def _reset_fabric(self, fabric_config):
+        if fabric_config:
+            ttnn.set_fabric_config(ttnn.FabricConfig.DISABLED)
 
-    async def load_model(self, device_params, request):
+    def _mesh_device(self):
+        device_params = {'l1_small_size': 57344}
         device_ids = ttnn.get_device_ids()
-        self.logger.info("Model warmup called")
-        try:
-            param = request.param
-        except (ValueError, AttributeError):
-            param = len(device_ids)  # Default to using all available devices
+
+        param = len(device_ids)  # Default to using all available devices
 
         if isinstance(param, tuple):
             grid_dims = param
             assert len(grid_dims) == 2, "Device mesh grid shape should have exactly two elements."
             num_devices_requested = grid_dims[0] * grid_dims[1]
             if num_devices_requested > len(device_ids):
-                self.logger.error("Requested more devices than available. Test not applicable for machine")
+                print("Requested more devices than available. Test not applicable for machine")
             mesh_shape = ttnn.MeshShape(*grid_dims)
             assert num_devices_requested <= len(device_ids), "Requested more devices than available."
         else:
             num_devices_requested = min(param, len(device_ids))
             mesh_shape = ttnn.MeshShape(1, num_devices_requested)
 
-        # request.node.pci_ids = [ttnn.GetPCIeDeviceID(i) for i in device_ids[:num_devices_requested]]
 
         updated_device_params = get_updated_device_params(device_params)
-        # fabric_config = updated_device_params.pop("fabric_config", None)
-        # reliability_mode = updated_device_params.pop("reliability_mode", None)
-        # self.set_fabric(fabric_config)
+        fabric_config = updated_device_params.pop("fabric_config", None)
+        self._set_fabric(fabric_config)
         mesh_device = ttnn.open_mesh_device(mesh_shape=mesh_shape, **updated_device_params)
 
-        # TODO change this
-        self.device = mesh_device
-        # TODO change this
+        self.logger.info(f"multidevice with {mesh_device.get_num_devices()} devices is created")
+        return mesh_device
 
-        # self.logger.info(f"multidevice with {mesh_device.get_num_devices()} devices is created")
-        # yield mesh_device
+        for submesh in mesh_device.get_submeshes():
+            ttnn.close_mesh_device(submesh)
 
-        # for submesh in mesh_device.get_submeshes():
-        #     ttnn.close_mesh_device(submesh)
+        ttnn.close_mesh_device(mesh_device)
+        self._reset_fabric(fabric_config)
+        del mesh_device
 
-        # ttnn.close_mesh_device(mesh_device)
-        # self.reset_fabric(fabric_config)
-        # del mesh_device
-
-        self.batch_size = self.device.get_num_devices()
-        # TODO remove this, we always work on device
-        vae_on_device = True
-
-        # TODO check what to do here
-        torch.manual_seed(0)
-
-        # TODO change this
-        prompts = ["A basketball player jumping over a building"]
-        # TODO change this
-
-        if isinstance(prompts, str):
-            prompts = [prompts]
-
-        self.needed_padding = (self.batch_size - len(prompts) % self.batch_size) % self.batch_size
-        prompts = prompts + [""] * self.needed_padding
-
-        # 0. Set up default height and width for unet
-        height = 1024
-        width = 1024
+    async def load_model(self):
+        self.ttnn_device = self._mesh_device()
 
         # 1. Load components
         self.pipeline = DiffusionPipeline.from_pretrained(
@@ -112,22 +89,22 @@ class TTSDXLRunner:
             use_safetensors=True,
         )
 
-        with ttnn.distribute(ttnn.ReplicateTensorToMesh(self.device)):
+        self.batch_size = self.ttnn_device.get_num_devices()
+
+        with ttnn.distribute(ttnn.ReplicateTensorToMesh(self.ttnn_device)):
             # 2. Load tt_unet, tt_vae and tt_scheduler
             tt_model_config = ModelOptimisations()
             self.tt_unet = TtUNet2DConditionModel(
-                self.device,
+                self.ttnn_device,
                 self.pipeline.unet.state_dict(),
                 "unet",
                 model_config=tt_model_config,
             )
             self.tt_vae = (
-                TtAutoencoderKL(self.device, self.pipeline.vae.state_dict(), tt_model_config, self.batch_size)
-                if vae_on_device
-                else None
+                TtAutoencoderKL(self.ttnn_device, self.pipeline.vae.state_dict(), tt_model_config, self.batch_size)
             )
             self.tt_scheduler = TtEulerDiscreteScheduler(
-                self.device,
+                self.ttnn_device,
                 self.pipeline.scheduler.config.num_train_timesteps,
                 self.pipeline.scheduler.config.beta_start,
                 self.pipeline.scheduler.config.beta_end,
@@ -147,6 +124,28 @@ class TTSDXLRunner:
                 self.pipeline.scheduler.config.final_sigmas_type,
             )
         self.pipeline.scheduler = self.tt_scheduler
+
+        self.logger.info("Model loaded successfully")
+
+    def runInference(self, prompt: str, num_inference_steps: int = 50):
+        prompts = [prompt]
+
+        evaluation_range = (0, 5000)
+
+        start_from, _ = evaluation_range
+        torch.manual_seed(0)
+
+        if isinstance(prompts, str):
+            prompts = [prompts]
+
+        needed_padding = (self.batch_size - len(prompts) % self.batch_size) % self.batch_size
+        prompts = prompts + [""] * needed_padding
+
+        guidance_scale = 5.0
+
+        # 0. Set up default height and width for unet
+        height = 1024
+        width = 1024
 
         cpu_device = "cpu"
 
@@ -180,23 +179,24 @@ class TTSDXLRunner:
         timesteps, num_inference_steps = retrieve_timesteps(self.pipeline.scheduler, num_inference_steps, cpu_device, None, None)
 
         # Convert timesteps to ttnn
+        ttnn_timesteps = []
         for t in timesteps:
             scalar_tensor = torch.tensor(t).unsqueeze(0)
-            self.ttnn_timesteps.append(
+            ttnn_timesteps.append(
                 ttnn.from_torch(
                     scalar_tensor,
                     dtype=ttnn.bfloat16,
-                    device=self.device,
+                    device=self.ttnn_device,
                     layout=ttnn.TILE_LAYOUT,
                     memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                    mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
+                    mesh_mapper=ttnn.ReplicateTensorToMesh(self.ttnn_device),
                 )
             )
 
         num_channels_latents = self.pipeline.unet.config.in_channels
         assert num_channels_latents == 4, f"num_channels_latents is {num_channels_latents}, but it should be 4"
 
-        self.latents = self.pipeline.prepare_latents(
+        latents = self.pipeline.prepare_latents(
             1,
             num_channels_latents,
             height,
@@ -207,7 +207,7 @@ class TTSDXLRunner:
             None,
         )
 
-        self.extra_step_kwargs = self.pipeline.prepare_extra_step_kwargs(None, 0.0)
+        extra_step_kwargs = self.pipeline.prepare_extra_step_kwargs(None, 0.0)
         text_encoder_projection_dim = self.pipeline.text_encoder_2.config.projection_dim
         assert (
             text_encoder_projection_dim == 1280
@@ -227,380 +227,38 @@ class TTSDXLRunner:
 
         torch_prompt_embeds = torch.stack([negative_prompt_embeds_torch, prompt_embeds_torch], dim=1)
         torch_add_text_embeds = torch.stack([negative_pooled_prompt_embeds_torch, pooled_prompt_embeds_torch], dim=1)
-        self.ttnn_prompt_embeds = ttnn.from_torch(
-            torch_prompt_embeds,
-            dtype=ttnn.bfloat16,
-            device=self.device,
-            layout=ttnn.TILE_LAYOUT,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            mesh_mapper=ttnn.ShardTensorToMesh(self.device, dim=0),
-        )
-        ttnn_add_text_embeds = ttnn.from_torch(
-            torch_add_text_embeds,
-            dtype=ttnn.bfloat16,
-            device=self.device,
-            layout=ttnn.ROW_MAJOR_LAYOUT,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            mesh_mapper=ttnn.ShardTensorToMesh(self.device, dim=0),
-        )
-
-        ttnn_add_time_id1 = ttnn.from_torch(
-            negative_add_time_ids.squeeze(0),
-            dtype=ttnn.bfloat16,
-            device=self.device,
-            layout=ttnn.TILE_LAYOUT,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
-        )
-        ttnn_add_time_id2 = ttnn.from_torch(
-            add_time_ids.squeeze(0),
-            dtype=ttnn.bfloat16,
-            device=self.device,
-            layout=ttnn.TILE_LAYOUT,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
-        )
-        self.ttnn_time_ids = [ttnn_add_time_id1, ttnn_add_time_id2]
-        self.ttnn_text_embeds = [
-            [
-                ttnn_add_text_embed[0],
-                ttnn_add_text_embed[1],
-            ]
-            for ttnn_add_text_embed in ttnn_add_text_embeds
-        ]
-
-        self.scaling_factor = ttnn.from_torch(
-            torch.Tensor([self.pipeline.vae.config.scaling_factor]),
-            dtype=ttnn.bfloat16,
-            device=self.device,
-            layout=ttnn.TILE_LAYOUT,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
-        )
-
-        B, C, H, W = self.latents.shape
-
-        # All device code will work with channel last tensors
-        self.latents = torch.permute(self.latents, (0, 2, 3, 1))
-        self.latents = self.latents.reshape(1, 1, B * H * W, C)
-
-        self.latents_clone = self.latents.clone()
-
-        self.latents = ttnn.from_torch(
-            self.latents,
-            dtype=ttnn.bfloat16,
-            device=self.device,
-            layout=ttnn.TILE_LAYOUT,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
-        )
-
-        # UNet will deallocate the input tensor
-        latent_model_input = ttnn.clone(self.latents)
-
-        self.logger.info("Performing warmup run, to make use of program caching in actual inference...")
-        run_tt_image_gen(
-            self.device,
-            self.tt_unet,
-            self.tt_scheduler,
-            latent_model_input,
-            self.ttnn_prompt_embeds,
-            self.ttnn_time_ids,
-            self.ttnn_text_embeds,
-            [self.ttnn_timesteps[0]],
-            self.extra_step_kwargs,
-            self.guidance_scale,
-            self.scaling_factor,
-            [B, C, H, W],
-            self.tt_vae if vae_on_device else self.pipeline.vae,
-            self.batch_size,
-            0,
-        )
-        profiler.clear()
-
-        if not os.path.exists("output"):
-            os.mkdir("output")
-
-    def runInference(self, prompts: List[str]):
-        # TODO check what to do here
-        # start_from, _ = evaluation_range
-        start_from, _ = 0,0
-
-        images = []
-        self.logger.info("Starting ttnn inference...")
-        for iter in range(len(prompts) // self.batch_size):
-            self.logger.info(
-                f"Running inference for prompts {iter * self.batch_size + 1}-{iter * self.batch_size + self.batch_size}/{len(prompts)}"
-            )
-
-            B, C, H, W = self.latents.shape
-
-            imgs = run_tt_image_gen(
-                self.device,
-                self.tt_unet,
-                self.tt_scheduler,
-                self.latents,
-                self.ttnn_prompt_embeds,
-                self.ttnn_time_ids,
-                self.ttnn_text_embeds,
-                self.ttnn_timesteps,
-                self.extra_step_kwargs,
-                self.guidance_scale,
-                self.scaling_factor,
-                [B, C, H, W],
-                self.tt_vae,
-                self.batch_size,
-                iter,
-            )
-
-            self.logger.info(f"Denoising loop for {self.batch_size} promts completed in {profiler.get('denoising_loop'):.2f} seconds")
-            self.logger.info(
-                f"{'On device VAE'} decoding completed in {profiler.get('vae_decode'):.2f} seconds"
-            )
-            profiler.clear()
-
-            for idx, img in enumerate(imgs):
-                if iter == len(prompts) // self.batch_size - 1 and idx >= self.batch_size - self.needed_padding:
-                    break
-                img = img.unsqueeze(0)
-                img = self.pipeline.image_processor.postprocess(img, output_type="pil")[0]
-                images.append(img)
-
-                img.save(f"output/output{len(images) + self.start_from}.png")
-                self.logger.info(f"Image saved to output/output{len(images) + start_from}.png")
-
-            self.latents = self.latents_clone.clone()
-            self.latents = ttnn.from_torch(
-                self.latents,
-                dtype=ttnn.bfloat16,
-                device=self.device,
-                layout=ttnn.TILE_LAYOUT,
-                memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
-            )
-
-            return images
-
-
-    def set_fabric(self,fabric_config):
-        # If fabric_config is not None, set it to fabric_config
-        if fabric_config:
-            ttnn.set_fabric_config(fabric_config)
-
-    def reset_fabric(self, fabric_config):
-        if fabric_config:
-            ttnn.set_fabric_config(ttnn.FabricConfig.DISABLED)
-
-    def mesh_device(self):
-        device_params = {'l1_small_size': 57344}
-        device_ids = ttnn.get_device_ids()
-
-        param = len(device_ids)  # Default to using all available devices
-
-        if isinstance(param, tuple):
-            grid_dims = param
-            assert len(grid_dims) == 2, "Device mesh grid shape should have exactly two elements."
-            num_devices_requested = grid_dims[0] * grid_dims[1]
-            if num_devices_requested > len(device_ids):
-                print("Requested more devices than available. Test not applicable for machine")
-            mesh_shape = ttnn.MeshShape(*grid_dims)
-            assert num_devices_requested <= len(device_ids), "Requested more devices than available."
-        else:
-            num_devices_requested = min(param, len(device_ids))
-            mesh_shape = ttnn.MeshShape(1, num_devices_requested)
-
-
-        updated_device_params = get_updated_device_params(device_params)
-        fabric_config = updated_device_params.pop("fabric_config", None)
-        self.set_fabric(fabric_config)
-        mesh_device = ttnn.open_mesh_device(mesh_shape=mesh_shape, **updated_device_params)
-
-        self.logger.info(f"multidevice with {mesh_device.get_num_devices()} devices is created")
-        return mesh_device
-
-        for submesh in mesh_device.get_submeshes():
-            ttnn.close_mesh_device(submesh)
-
-        ttnn.close_mesh_device(mesh_device)
-        self.reset_fabric(fabric_config)
-        del mesh_device
-
-    def one_step_inference(self):
-        prompts = ["An astronaut riding a red horse with exactly 4 legs"]
-        ttnn_device = self.mesh_device()
-        batch_size = ttnn_device.get_num_devices()
-        evaluation_range = (0, 5000)
-
-        start_from, _ = evaluation_range
-        torch.manual_seed(0)
-
-        if isinstance(prompts, str):
-            prompts = [prompts]
-
-        needed_padding = (batch_size - len(prompts) % batch_size) % batch_size
-        prompts = prompts + [""] * needed_padding
-
-        guidance_scale = 5.0
-
-        # 0. Set up default height and width for unet
-        height = 1024
-        width = 1024
-
-        # 1. Load components
-        pipeline = DiffusionPipeline.from_pretrained(
-            "stabilityai/stable-diffusion-xl-base-1.0",
-            torch_dtype=torch.float32,
-            use_safetensors=True,
-        )
-
-        with ttnn.distribute(ttnn.ReplicateTensorToMesh(ttnn_device)):
-            # 2. Load tt_unet, tt_vae and tt_scheduler
-            tt_model_config = ModelOptimisations()
-            tt_unet = TtUNet2DConditionModel(
-                ttnn_device,
-                pipeline.unet.state_dict(),
-                "unet",
-                model_config=tt_model_config,
-            )
-            tt_vae = (
-                TtAutoencoderKL(ttnn_device, pipeline.vae.state_dict(), tt_model_config, batch_size)
-            )
-            tt_scheduler = TtEulerDiscreteScheduler(
-                ttnn_device,
-                pipeline.scheduler.config.num_train_timesteps,
-                pipeline.scheduler.config.beta_start,
-                pipeline.scheduler.config.beta_end,
-                pipeline.scheduler.config.beta_schedule,
-                pipeline.scheduler.config.trained_betas,
-                pipeline.scheduler.config.prediction_type,
-                pipeline.scheduler.config.interpolation_type,
-                pipeline.scheduler.config.use_karras_sigmas,
-                pipeline.scheduler.config.use_exponential_sigmas,
-                pipeline.scheduler.config.use_beta_sigmas,
-                pipeline.scheduler.config.sigma_min,
-                pipeline.scheduler.config.sigma_max,
-                pipeline.scheduler.config.timestep_spacing,
-                pipeline.scheduler.config.timestep_type,
-                pipeline.scheduler.config.steps_offset,
-                pipeline.scheduler.config.rescale_betas_zero_snr,
-                pipeline.scheduler.config.final_sigmas_type,
-            )
-        pipeline.scheduler = tt_scheduler
-
-        cpu_device = "cpu"
-
-        all_embeds = [
-            pipeline.encode_prompt(
-                prompt=prompt,
-                prompt_2=None,
-                device=cpu_device,
-                num_images_per_prompt=1,
-                do_classifier_free_guidance=True,
-                negative_prompt=None,
-                negative_prompt_2=None,
-                prompt_embeds=None,
-                negative_prompt_embeds=None,
-                pooled_prompt_embeds=None,
-                negative_pooled_prompt_embeds=None,
-                lora_scale=None,
-                clip_skip=None,
-            )
-            for prompt in prompts
-        ]
-
-        prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = zip(*all_embeds)
-
-        prompt_embeds_torch = torch.cat(prompt_embeds, dim=0)
-        negative_prompt_embeds_torch = torch.cat(negative_prompt_embeds, dim=0)
-        pooled_prompt_embeds_torch = torch.cat(pooled_prompt_embeds, dim=0)
-        negative_pooled_prompt_embeds_torch = torch.cat(negative_pooled_prompt_embeds, dim=0)
-
-        num_inference_steps = 50
-
-        # Prepare timesteps
-        timesteps, num_inference_steps = retrieve_timesteps(pipeline.scheduler, num_inference_steps, cpu_device, None, None)
-
-        # Convert timesteps to ttnn
-        ttnn_timesteps = []
-        for t in timesteps:
-            scalar_tensor = torch.tensor(t).unsqueeze(0)
-            ttnn_timesteps.append(
-                ttnn.from_torch(
-                    scalar_tensor,
-                    dtype=ttnn.bfloat16,
-                    device=ttnn_device,
-                    layout=ttnn.TILE_LAYOUT,
-                    memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                    mesh_mapper=ttnn.ReplicateTensorToMesh(ttnn_device),
-                )
-            )
-
-        num_channels_latents = pipeline.unet.config.in_channels
-        assert num_channels_latents == 4, f"num_channels_latents is {num_channels_latents}, but it should be 4"
-
-        latents = pipeline.prepare_latents(
-            1,
-            num_channels_latents,
-            height,
-            width,
-            prompt_embeds[0].dtype,
-            cpu_device,
-            None,
-            None,
-        )
-
-        extra_step_kwargs = pipeline.prepare_extra_step_kwargs(None, 0.0)
-        text_encoder_projection_dim = pipeline.text_encoder_2.config.projection_dim
-        assert (
-            text_encoder_projection_dim == 1280
-        ), f"text_encoder_projection_dim is {text_encoder_projection_dim}, but it should be 1280"
-
-        original_size = (height, width)
-        target_size = (height, width)
-        crops_coords_top_left = (0, 0)
-        add_time_ids = pipeline._get_add_time_ids(
-            original_size,
-            crops_coords_top_left,
-            target_size,
-            dtype=prompt_embeds[0].dtype,
-            text_encoder_projection_dim=text_encoder_projection_dim,
-        )
-        negative_add_time_ids = add_time_ids
-
-        torch_prompt_embeds = torch.stack([negative_prompt_embeds_torch, prompt_embeds_torch], dim=1)
-        torch_add_text_embeds = torch.stack([negative_pooled_prompt_embeds_torch, pooled_prompt_embeds_torch], dim=1)
         ttnn_prompt_embeds = ttnn.from_torch(
             torch_prompt_embeds,
             dtype=ttnn.bfloat16,
-            device=ttnn_device,
+            device=self.ttnn_device,
             layout=ttnn.TILE_LAYOUT,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            mesh_mapper=ttnn.ShardTensorToMesh(ttnn_device, dim=0),
+            mesh_mapper=ttnn.ShardTensorToMesh(self.ttnn_device, dim=0),
         )
         ttnn_add_text_embeds = ttnn.from_torch(
             torch_add_text_embeds,
             dtype=ttnn.bfloat16,
-            device=ttnn_device,
+            device=self.ttnn_device,
             layout=ttnn.ROW_MAJOR_LAYOUT,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            mesh_mapper=ttnn.ShardTensorToMesh(ttnn_device, dim=0),
+            mesh_mapper=ttnn.ShardTensorToMesh(self.ttnn_device, dim=0),
         )
 
         ttnn_add_time_id1 = ttnn.from_torch(
             negative_add_time_ids.squeeze(0),
             dtype=ttnn.bfloat16,
-            device=ttnn_device,
+            device=self.ttnn_device,
             layout=ttnn.TILE_LAYOUT,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            mesh_mapper=ttnn.ReplicateTensorToMesh(ttnn_device),
+            mesh_mapper=ttnn.ReplicateTensorToMesh(self.ttnn_device),
         )
         ttnn_add_time_id2 = ttnn.from_torch(
             add_time_ids.squeeze(0),
             dtype=ttnn.bfloat16,
-            device=ttnn_device,
+            device=self.ttnn_device,
             layout=ttnn.TILE_LAYOUT,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            mesh_mapper=ttnn.ReplicateTensorToMesh(ttnn_device),
+            mesh_mapper=ttnn.ReplicateTensorToMesh(self.ttnn_device),
         )
         ttnn_time_ids = [ttnn_add_time_id1, ttnn_add_time_id2]
         ttnn_text_embeds = [
@@ -612,12 +270,12 @@ class TTSDXLRunner:
         ]
 
         scaling_factor = ttnn.from_torch(
-            torch.Tensor([pipeline.vae.config.scaling_factor]),
+            torch.Tensor([self.pipeline.vae.config.scaling_factor]),
             dtype=ttnn.bfloat16,
-            device=ttnn_device,
+            device=self.ttnn_device,
             layout=ttnn.TILE_LAYOUT,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            mesh_mapper=ttnn.ReplicateTensorToMesh(ttnn_device),
+            mesh_mapper=ttnn.ReplicateTensorToMesh(self.ttnn_device),
         )
 
         B, C, H, W = latents.shape
@@ -631,10 +289,10 @@ class TTSDXLRunner:
         latents = ttnn.from_torch(
             latents,
             dtype=ttnn.bfloat16,
-            device=ttnn_device,
+            device=self.ttnn_device,
             layout=ttnn.TILE_LAYOUT,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            mesh_mapper=ttnn.ReplicateTensorToMesh(ttnn_device),
+            mesh_mapper=ttnn.ReplicateTensorToMesh(self.ttnn_device),
         )
 
         # UNet will deallocate the input tensor
@@ -642,9 +300,9 @@ class TTSDXLRunner:
 
         # logger.info("Performing warmup run, to make use of program caching in actual inference...")
         run_tt_image_gen(
-            ttnn_device,
-            tt_unet,
-            tt_scheduler,
+            self.ttnn_device,
+            self.tt_unet,
+            self.tt_scheduler,
             latent_model_input,
             ttnn_prompt_embeds,
             ttnn_time_ids,
@@ -654,8 +312,8 @@ class TTSDXLRunner:
             guidance_scale,
             scaling_factor,
             [B, C, H, W],
-            tt_vae,
-            batch_size,
+            self.tt_vae,
+            self.batch_size,
             0,
         )
         profiler.clear()
@@ -665,14 +323,14 @@ class TTSDXLRunner:
 
         images = []
         self.logger.info("Starting ttnn inference...")
-        for iter in range(len(prompts) // batch_size):
+        for iter in range(len(prompts) // self.batch_size):
             self.logger.info(
-                f"Running inference for prompts {iter * batch_size + 1}-{iter * batch_size + batch_size}/{len(prompts)}"
+                f"Running inference for prompts {iter * self.batch_size + 1}-{iter * self.batch_size + self.batch_size}/{len(prompts)}"
             )
             imgs = run_tt_image_gen(
-                ttnn_device,
-                tt_unet,
-                tt_scheduler,
+                self.ttnn_device,
+                self.tt_unet,
+                self.tt_scheduler,
                 latents,
                 ttnn_prompt_embeds,
                 ttnn_time_ids,
@@ -682,22 +340,22 @@ class TTSDXLRunner:
                 guidance_scale,
                 scaling_factor,
                 [B, C, H, W],
-                tt_vae,
-                batch_size,
+                self.tt_vae,
+                self.batch_size,
                 iter,
             )
 
-            self.logger.info(f"Denoising loop for {batch_size} promts completed in {profiler.get('denoising_loop'):.2f} seconds")
+            self.logger.info(f"Denoising loop for {self.batch_size} promts completed in {profiler.get('denoising_loop'):.2f} seconds")
             self.logger.info(
                 f"{'On device VAE'} decoding completed in {profiler.get('vae_decode'):.2f} seconds"
             )
             profiler.clear()
 
             for idx, img in enumerate(imgs):
-                if iter == len(prompts) // batch_size - 1 and idx >= batch_size - needed_padding:
+                if iter == len(prompts) // self.batch_size - 1 and idx >= self.batch_size - needed_padding:
                     break
                 img = img.unsqueeze(0)
-                img = pipeline.image_processor.postprocess(img, output_type="pil")[0]
+                img = self.pipeline.image_processor.postprocess(img, output_type="pil")[0]
                 images.append(img)
                 img.save(f"output/output{len(images) + start_from}.png")
                 self.logger.info(f"Image saved to output/output{len(images) + start_from}.png")
@@ -706,10 +364,10 @@ class TTSDXLRunner:
             latents = ttnn.from_torch(
                 latents,
                 dtype=ttnn.bfloat16,
-                device=ttnn_device,
+                device=self.ttnn_device,
                 layout=ttnn.TILE_LAYOUT,
                 memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                mesh_mapper=ttnn.ReplicateTensorToMesh(ttnn_device),
+                mesh_mapper=ttnn.ReplicateTensorToMesh(self.ttnn_device),
             )
 
         return images

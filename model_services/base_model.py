@@ -4,7 +4,7 @@ from domain.image_generate_request import ImageGenerateRequest
 
 
 class BaseModel:
-    async def processImage(self, imageGenerateRequest: ImageGenerateRequest):
+    def processImage(self, imageGenerateRequest: ImageGenerateRequest):
         return NotImplementedError("Method not implemented")
 
     def isModelReady(self) -> bool:
