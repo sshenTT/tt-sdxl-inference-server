@@ -1,11 +1,11 @@
 import uuid
 from pydantic import BaseModel, Field
 
-from domain.output_format import OutputFormat
+# from domain.output_format import OutputFormat
 
 class ImageGenerateRequest(BaseModel):
     prompt: str
-    output_format: OutputFormat
+    # output_format: OutputFormat
     num_inference_step: int = Field(..., ge=20, le=50)
 
 # class ImageGenerateTask(ImageGenerateRequest):

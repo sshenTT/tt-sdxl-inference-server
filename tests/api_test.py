@@ -3,7 +3,7 @@ import aiohttp
 import asyncio
 import time
 
-API_URL = "http://localhost:9000/image/generations"
+API_URL = "http://localhost:9001/image/generations"
 
 payload = {
     "prompt": "Porsche 911 from year 2001 in silver color with 22 inch wheels",

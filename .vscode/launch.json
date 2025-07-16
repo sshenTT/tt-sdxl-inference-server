@@ -10,7 +10,7 @@
         "main:app",        // Replace with your actual module path
         "--reload",
         "--port", "9000",
-        "--workers", "12"
+        "--workers", "1"
       ],
         "env": {
             "ARCH_NAME": "wormhole_b0",

@@ -79,7 +79,7 @@ class TTSDXLRunner:
         self._reset_fabric(fabric_config)
         del mesh_device
 
-    async def load_model(self):
+    async def load_model(self)->bool:
         self.ttnn_device = self._mesh_device()
 
         # 1. Load components
@@ -127,12 +127,15 @@ class TTSDXLRunner:
 
         self.logger.info("Model loaded successfully")
 
+        self.runInference("Sunrise on a beach", 20)
+
+        self.logger.info("Model warmup completed")
+
+        return True
+
     def runInference(self, prompt: str, num_inference_steps: int = 50):
         prompts = [prompt]
 
-        evaluation_range = (0, 5000)
-
-        start_from, _ = evaluation_range
         torch.manual_seed(0)
 
         if isinstance(prompts, str):
@@ -295,31 +298,6 @@ class TTSDXLRunner:
             mesh_mapper=ttnn.ReplicateTensorToMesh(self.ttnn_device),
         )
 
-        # UNet will deallocate the input tensor
-        latent_model_input = ttnn.clone(latents)
-
-        # logger.info("Performing warmup run, to make use of program caching in actual inference...")
-        run_tt_image_gen(
-            self.ttnn_device,
-            self.tt_unet,
-            self.tt_scheduler,
-            latent_model_input,
-            ttnn_prompt_embeds,
-            ttnn_time_ids,
-            ttnn_text_embeds,
-            [ttnn_timesteps[0]],
-            extra_step_kwargs,
-            guidance_scale,
-            scaling_factor,
-            [B, C, H, W],
-            self.tt_vae,
-            self.batch_size,
-            0,
-        )
-        profiler.clear()
-
-        if not os.path.exists("output"):
-            os.mkdir("output")
 
         images = []
         self.logger.info("Starting ttnn inference...")
@@ -357,8 +335,6 @@ class TTSDXLRunner:
                 img = img.unsqueeze(0)
                 img = self.pipeline.image_processor.postprocess(img, output_type="pil")[0]
                 images.append(img)
-                img.save(f"output/output{len(images) + start_from}.png")
-                self.logger.info(f"Image saved to output/output{len(images) + start_from}.png")
 
             latents = latents_clone.clone()
             latents = ttnn.from_torch(
