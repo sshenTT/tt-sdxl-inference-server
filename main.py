@@ -13,7 +13,7 @@ env = "development"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # warmup model on startup
-    await model_resolver().warmupModel()
+    model_resolver().startWorkers()
     yield
 
 app = FastAPI(

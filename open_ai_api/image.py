@@ -1,3 +1,5 @@
+from asyncio import get_running_loop
+from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
@@ -12,8 +14,14 @@ router = APIRouter()
 
 @router.post('/generations')
 async def generateImage(imageGenerateRequest: ImageGenerateRequest, service: BaseModel = Depends(model_resolver)):
-    image_bytes = await run_in_threadpool(service.processImage, imageGenerateRequest)
-    return Response(content=image_bytes, media_type="image/png")
+    task_id = str(uuid4())
+    imageGenerateRequest._task_id = task_id
+    service.processImage(imageGenerateRequest)
+    future = get_running_loop().create_future()
+    service.result_futures[task_id] = future
+    result = await future
+    service.result_futures.pop(task_id, None)
+    return Response(content=result, media_type="image/png")
 
 ### 📤 Download Endpoint
 @router.get("/download/{filename}")
