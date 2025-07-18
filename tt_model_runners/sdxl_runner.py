@@ -80,6 +80,7 @@ class TTSDXLRunner:
         del mesh_device
 
     async def load_model(self)->bool:
+        self.logger.info("Loading model...")
         self.ttnn_device = self._mesh_device()
 
         # 1. Load components
@@ -88,6 +89,8 @@ class TTSDXLRunner:
             torch_dtype=torch.float32,
             use_safetensors=True,
         )
+
+        self.logger.info("Model weights downloaded successfully")
 
         self.batch_size = self.ttnn_device.get_num_devices()
 

@@ -15,6 +15,7 @@ async def lifespan(app: FastAPI):
     # warmup model on startup
     model_resolver().startWorkers()
     yield
+    model_resolver().stopWorkers()
 
 app = FastAPI(
     title="TT inference server",
@@ -25,4 +26,5 @@ app = FastAPI(
     version="0.0.1",
     lifespan=lifespan
 )
+
 app.include_router(api_router)

@@ -5,31 +5,36 @@ from fastapi import HTTPException
 from domain.image_generate_request import ImageGenerateRequest
 from model_services.base_model import BaseModel
 from tt_model_runners.sdxl_runner import TTSDXLRunner
+from utils.helpers import log_execution_time
 from utils.image_manager import ImageManager
 from utils.logger import TTLogger
 from multiprocessing import Process, Queue
 
 class SDXLService(BaseModel):
-    isReady = False
-    imageManager = None
-    maxWorkerSize = 1
-    task_queue = Queue(maxWorkerSize)
-    result_futures = {}
-    result_queue = Queue()
-    tt_sdxl_runner = None
 
+    @log_execution_time("Task queue init")
     def __init__(self):
+        self.isReady = False
+        self.maxWorkerSize = 1
+        self.task_queue = Queue(4)
+        self.maxWorkerSize = 1
+        self.result_futures = {}
+        self.result_queue = Queue()
+        self.workers = []
         self.logger = TTLogger()
         self.imageManager = ImageManager("img")
         # init queue
-        self.task_queue = Queue(self.maxWorkerSize)
+        self.task_queue = Queue(4)
+        self.listener_task_ref = None
+        self.listener_running = True
         # init sdxl runner
-        # self.tt_sdxl_runner = TTSDXLRunner()
-        # run queue worker async
 
+    @log_execution_time("Scheduler image processing")
     def processImage(self, imageGenerateRequest: ImageGenerateRequest) -> str:
+        if (self.task_queue.full()):
+            raise HTTPException(500, "Task queue is full")
+        self.task_queue.put((imageGenerateRequest))
         # self.checkIsModelReady()
-        self.addTask(imageGenerateRequest)
         # start = time.perf_counter()
         # ImageGenerateTask.model_construct()
         # generateImageTask = ImageGenerateTask.from_request(imageGenerateRequest)
@@ -44,35 +49,6 @@ class SDXLService(BaseModel):
         # self.logger.logTime(start, end, "Inference time:")
         # return self.imageManager.convertImageToBytes(images[0])
 
-    async def warmupModel(self):
-        # run worker
-        asyncio.create_task(self.createAsyncReservations())
-        # asyncio.to_thread(self.runWorker())
-        start = time.perf_counter()
-        end = time.perf_counter()
-
-        print("Loading model!!!!!!!")
-        # asyncio.to_thread(self.tt_sdxl_runner.load_model())
-        self.logger.logTime(start, end, "Model loaded:")
-        return True
-
-    async def createAsyncReservations(self):
-        print("Deploying worker and starting model warmup")
-        asyncio.create_task(self.result_listener())
-        await asyncio.to_thread(self.run_model_warmup_in_thread)
-        await asyncio.to_thread(self.run_worker_in_thread)
-
-    def run_worker_in_thread(self):
-        print("Running worker in thread")
-        self.startWorkers()
-
-    def run_model_warmup_in_thread(self):
-        import asyncio
-        print("Running model warmup in thread")
-        # self.tt_sdxl_runner.mesh_device(device_params, {})
-        # asyncio.run(self.tt_sdxl_runner.load_model())
-        self.isReady = True
-
     def isModelReady(self) -> bool:
         return self.isReady
 
@@ -80,67 +56,55 @@ class SDXLService(BaseModel):
         if (self.isModelReady() is not True):
             raise HTTPException(405, "Model is not ready")
 
-    def addTask(self, imageGenerateRequest: ImageGenerateRequest):
-        if (self.task_queue.full()):
-            raise HTTPException(500, "Task queue is full")
-        self.task_queue.put((imageGenerateRequest))
-
-    # async def runWorker(self):
-    #     self.logger.info("Worker is starting")
-    #     while True:
-    #         # TODO find a free device 
-    #         task, completion = await self.task_queue.get()
-    #         await task
-    #         completion = True
-    #         try:
-    #             print(f"Processing task: {task}")
-    #             await asyncio.sleep(1)  # Simulate work
-    #         finally:
-    #             self.task_queue.task_done()
-
-    def worker(self, worker_id, task_queue: Queue, result_queue):
-        tt_sdxl_runner = TTSDXLRunner()
-        asyncio.run(tt_sdxl_runner.load_model())
-        while True:
-            imageGenerateRequest = task_queue.get()
-            if imageGenerateRequest is None:  # Sentinel to shut down
-                break
-            self.logger.info(f"Worker {worker_id} processing task: {imageGenerateRequest}")
-            images = tt_sdxl_runner.runInference(imageGenerateRequest.prompt, imageGenerateRequest.num_inference_step)
-            self.logger.info(f"Worker {worker_id} finished processing task: {imageGenerateRequest}")
-            # TODO add adding and handling withn a queue, this is a shortcut
-            # await taskCompletionSignal
-            image = self.imageManager.convertImageToBytes(images[0])
-            result_queue.put((imageGenerateRequest._task_id, image))
-    
+    @log_execution_time("Workes creation")
     def startWorkers(self):
-        asyncio.create_task(self.result_listener())
-        workers = []
+        # keep result listener in the main event loop
+        self.listener_task_ref = asyncio.create_task(self.result_listener())
 
         # Spawn one process per worker
         for i in range(self.maxWorkerSize):
-            p = Process(target=self.worker, args=(i, self.task_queue, self.result_queue))
+            p = Process(target=worker, args=(i, self.task_queue, self.result_queue))
             p.start()
-            workers.append(p)
-        # Send tasks
-        # for task in range(10):
-        #     task_queue.put(task)
-
-        # Send shutdown signals
-        # for _ in workers:
-        #     task_queue.put(None)
-
-        # Collect results
-        # for _ in range(10):
-        #     print(result_queue.get())
-
-        # Join workers
-        # for p in workers:
-        #     p.join()
+            self.workers.append(p)
 
     async def result_listener(self):
-        while True:
+        while self.listener_running:
             task_id, image = await asyncio.to_thread(self.result_queue.get)
             future = self.result_futures.pop(task_id, None)
             if future:
                 future.set_result(image)
+
+    def stopWorkers(self):
+        self.logger.info("Stopping workers")
+        self.listener_running = False
+        # Unblock result_listener if it's waiting
+        self.result_queue.put((None, None))
+        if self.listener_task_ref:
+            self.listener_task_ref.cancel()
+        for worker in self.workers:
+            self.task_queue.put(None)
+            worker.kill()
+            worker.join()
+        self.workers.clear()
+        # Clean up queueus
+        self.task_queue.close()
+        self.task_queue.join_thread()
+        self.result_queue.close()
+        self.result_queue.join_thread()
+        self.result_futures.clear()
+        self.isReady = False
+        self.logger.info("Workers stopped")
+
+def worker(worker_id, task_queue: Queue, result_queue):
+    tt_sdxl_runner = TTSDXLRunner()
+    asyncio.run(tt_sdxl_runner.load_model())
+    while True:
+        imageGenerateRequest = task_queue.get()
+        if imageGenerateRequest is None:  # Sentinel to shut down
+            break
+        # self.logger.info(f"Worker {worker_id} processing task: {imageGenerateRequest}")
+        images = tt_sdxl_runner.runInference(imageGenerateRequest.prompt, imageGenerateRequest.num_inference_step)
+        # self.logger.info(f"Worker {worker_id} finished processing task: {imageGenerateRequest}")
+        image = ImageManager("img").convertImageToBytes(images[0])
+        # add to result queue since we cannot use future in multiprocessing
+        result_queue.put((imageGenerateRequest._task_id, image))

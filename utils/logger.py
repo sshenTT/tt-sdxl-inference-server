@@ -1,4 +1,4 @@
-from decimal import ROUND_CEILING, Decimal
+from decimal import ROUND_CEILING
 import logging
 import os
 

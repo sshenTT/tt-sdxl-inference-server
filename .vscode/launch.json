@@ -9,7 +9,8 @@
       "args": [
         "main:app",        // Replace with your actual module path
         "--reload",
-        "--port", "9000",
+        "--port", "9006",
+        "-lifespan", "on", // Ensures lifespan events are handled
         "--workers", "1"
       ],
         "env": {
