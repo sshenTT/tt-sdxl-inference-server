@@ -1,7 +1,7 @@
 from . import model_resolver
 from model_services.base_model import BaseModel
 from model_services.sdxl_service import SDXLService
-from model_services.task_worker import TaskWorker
+from model_services.device_worker import TaskWorker
 
 def setup_module(module):
     # Reset singletons before each test module

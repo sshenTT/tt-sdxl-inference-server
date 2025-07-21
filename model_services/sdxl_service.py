@@ -2,7 +2,10 @@ import asyncio
 import time
 
 from fastapi import HTTPException
+from fastapi.params import Depends
+from config.settings import Settings, get_settings
 from domain.image_generate_request import ImageGenerateRequest
+from model_services.device_worker import device_worker
 from model_services.base_model import BaseModel
 from tt_model_runners.sdxl_runner import TTSDXLRunner
 from utils.helpers import log_execution_time
@@ -14,20 +17,18 @@ class SDXLService(BaseModel):
 
     @log_execution_time("Task queue init")
     def __init__(self):
+        settings = get_settings()
+        self.logger = TTLogger()
         self.isReady = False
-        self.maxWorkerSize = 1
-        self.task_queue = Queue(4)
-        self.maxWorkerSize = 1
+        self.worker_count = self._getWorkerCount(settings)
+        self.task_queue = Queue(self._get_max_queue_size(settings))
         self.result_futures = {}
         self.result_queue = Queue()
         self.workers = []
-        self.logger = TTLogger()
         self.imageManager = ImageManager("img")
         # init queue
-        self.task_queue = Queue(4)
         self.listener_task_ref = None
         self.listener_running = True
-        # init sdxl runner
 
     @log_execution_time("Scheduler image processing")
     def processImage(self, imageGenerateRequest: ImageGenerateRequest) -> str:
@@ -62,8 +63,8 @@ class SDXLService(BaseModel):
         self.listener_task_ref = asyncio.create_task(self.result_listener())
 
         # Spawn one process per worker
-        for i in range(self.maxWorkerSize):
-            p = Process(target=worker, args=(i, self.task_queue, self.result_queue))
+        for i in range(self.worker_count):
+            p = Process(target=device_worker, args=(i, self.task_queue, self.result_queue))
             p.start()
             self.workers.append(p)
 
@@ -94,17 +95,25 @@ class SDXLService(BaseModel):
         self.result_futures.clear()
         self.isReady = False
         self.logger.info("Workers stopped")
-
-def worker(worker_id, task_queue: Queue, result_queue):
-    tt_sdxl_runner = TTSDXLRunner()
-    asyncio.run(tt_sdxl_runner.load_model())
-    while True:
-        imageGenerateRequest = task_queue.get()
-        if imageGenerateRequest is None:  # Sentinel to shut down
-            break
-        # self.logger.info(f"Worker {worker_id} processing task: {imageGenerateRequest}")
-        images = tt_sdxl_runner.runInference(imageGenerateRequest.prompt, imageGenerateRequest.num_inference_step)
-        # self.logger.info(f"Worker {worker_id} finished processing task: {imageGenerateRequest}")
-        image = ImageManager("img").convertImageToBytes(images[0])
-        # add to result queue since we cannot use future in multiprocessing
-        result_queue.put((imageGenerateRequest._task_id, image))
+    
+    def _getWorkerCount(self, setttings: Settings) -> int:
+        try:
+            workerCount = len(setttings.device_ids.split(","))
+            if workerCount < 1:
+                self.logger.error("Worker count is 0")
+                raise ValueError("Worker count must be at least 1")
+            return workerCount
+        except Exception as e:
+            self.logger.error(f"Erros getting workers cannot: {e}")
+            raise HTTPException(status_code=500, detail="Workers cannot be initialized")
+    
+    def _get_max_queue_size(self, settings: Settings) -> int:
+        try:
+            max_queue_size = settings.max_queue_size
+            if max_queue_size < 1:
+                self.logger.error("Max queue size is 0")
+                raise ValueError("Max queue size must be at least 1")
+            return max_queue_size
+        except Exception as e:
+            self.logger.error(f"Error getting max queue size: {e}")
+            raise HTTPException(status_code=500, detail="Max queue size not provided in settings")

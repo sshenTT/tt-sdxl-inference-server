@@ -2,7 +2,7 @@
 
 A scalable and enhanced FastAPI project template with authentication, machine learning endpoints, background tasks, caching, rate limiting, and middleware support.
 
-MODEL_IN_USE - SDXL-3.5
+MODEL_IN_USE - SDXL
 LOG_LEVEL - CRITICAL = 50
     FATAL = CRITICAL
     ERROR = 40
