@@ -20,41 +20,31 @@ class SDXLService(BaseModel):
         settings = get_settings()
         self.logger = TTLogger()
         self.isReady = False
-        self.worker_count = self._getWorkerCount(settings)
+        worker_count = self._getWorkerCount(settings)
+        self.worker_count = worker_count
+        # a queue containting signals for warmup
+        self.warmup_signals_queue = Queue(worker_count)
         self.task_queue = Queue(self._get_max_queue_size(settings))
         self.result_futures = {}
         self.result_queue = Queue()
         self.workers = []
+        self.ready_devices = []
         self.imageManager = ImageManager("img")
         # init queue
         self.listener_task_ref = None
+        self.device_warmup_listener_ref = None
         self.listener_running = True
+        self.device_warmup_listener_running = True
 
     @log_execution_time("Scheduler image processing")
     def processImage(self, imageGenerateRequest: ImageGenerateRequest) -> str:
+        self.checkIsModelReady()
         if (self.task_queue.full()):
             raise HTTPException(500, "Task queue is full")
         self.task_queue.put((imageGenerateRequest))
-        # self.checkIsModelReady()
-        # start = time.perf_counter()
-        # ImageGenerateTask.model_construct()
-        # generateImageTask = ImageGenerateTask.from_request(imageGenerateRequest)
-        # taskCompletionSignal = await self.addTask(generateImageTask)
-        # TODO await completion
-        # TODO add adding and handling withn a queue, this is a shortcut
-        # images = self.tt_sdxl_runner.runInference(imageGenerateRequest.prompt, imageGenerateRequest.num_inference_step)
-        # # TODO add adding and handling withn a queue, this is a shortcut
-        # # await taskCompletionSignal
-        # end = time.perf_counter()
-
-        # self.logger.logTime(start, end, "Inference time:")
-        # return self.imageManager.convertImageToBytes(images[0])
-
-    def isModelReady(self) -> bool:
-        return self.isReady
 
     def checkIsModelReady(self):
-        if (self.isModelReady() is not True):
+        if (self.isReady is not True):
             raise HTTPException(405, "Model is not ready")
 
     @log_execution_time("Workes creation")
@@ -62,11 +52,15 @@ class SDXLService(BaseModel):
         # keep result listener in the main event loop
         self.listener_task_ref = asyncio.create_task(self.result_listener())
 
+        # keep device warmup listener in the main event loop, it'll close soon
+        self.device_warmup_listener_ref = asyncio.create_task(self.device_warmup_listener())
+
         # Spawn one process per worker
         for i in range(self.worker_count):
-            p = Process(target=device_worker, args=(i, self.task_queue, self.result_queue))
+            p = Process(target=device_worker, args=(i, self.task_queue, self.result_queue, self.warmup_signals_queue))
             p.start()
             self.workers.append(p)
+        self.logger.info(f"Workers started: {self.worker_count}")
 
     async def result_listener(self):
         while self.listener_running:
@@ -74,12 +68,27 @@ class SDXLService(BaseModel):
             future = self.result_futures.pop(task_id, None)
             if future:
                 future.set_result(image)
+        self.logger.info("Result listener stopped")
+
+    async def device_warmup_listener(self):
+        while self.device_warmup_listener_running == True:
+            device_id = await asyncio.to_thread(self.warmup_signals_queue.get)
+            self.logger.info(f"Device {device_id} is warmed up")
+            self.ready_devices.append(device_id)
+            # we can accept requests as soon as one device is ready
+            self.isReady = True
+            if len(self.ready_devices) == self.worker_count:
+                self.logger.info("All devices are warmed up and ready")
+                self.device_warmup_listener_running = False
+                # close queue, we're done
+                self._close_queues([self.warmup_signals_queue])
+        self.logger.info("Device warmup listener stopped")
+
 
     def stopWorkers(self):
         self.logger.info("Stopping workers")
         self.listener_running = False
-        # Unblock result_listener if it's waiting
-        self.result_queue.put((None, None))
+        self.device_warmup_listener_running = False
         if self.listener_task_ref:
             self.listener_task_ref.cancel()
         for worker in self.workers:
@@ -88,10 +97,9 @@ class SDXLService(BaseModel):
             worker.join()
         self.workers.clear()
         # Clean up queueus
-        self.task_queue.close()
-        self.task_queue.join_thread()
-        self.result_queue.close()
-        self.result_queue.join_thread()
+        self._close_queues([self.task_queue, self.result_queue, self.warmup_signals_queue])
+        if self.device_warmup_listener_ref:
+            self.device_warmup_listener_ref.cancel()
         self.result_futures.clear()
         self.isReady = False
         self.logger.info("Workers stopped")
@@ -117,3 +125,15 @@ class SDXLService(BaseModel):
         except Exception as e:
             self.logger.error(f"Error getting max queue size: {e}")
             raise HTTPException(status_code=500, detail="Max queue size not provided in settings")
+
+    def _close_queues(self, queues: list[Queue]):
+        queues_closed = 0
+        for idx, queue in enumerate(queues):
+            try:
+                queue.close()
+                queue.join_thread()
+                queues_closed += 1
+            except Exception as e:
+                self.logger.error(f"Error closing queue #{idx}: {e}")
+            
+        self.logger.info(f"Queues ({queues_closed}) closed successfully")

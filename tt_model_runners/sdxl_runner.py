@@ -72,12 +72,10 @@ class TTSDXLRunner:
         self.logger.info(f"multidevice with {mesh_device.get_num_devices()} devices is created")
         return mesh_device
 
-        for submesh in mesh_device.get_submeshes():
+    def close_device(self) -> bool:
+        for submesh in self.mesh_device.get_submeshes():
             ttnn.close_mesh_device(submesh)
-
-        ttnn.close_mesh_device(mesh_device)
-        self._reset_fabric(fabric_config)
-        del mesh_device
+        ttnn.close_mesh_device(self.mesh_device)
 
     async def load_model(self)->bool:
         self.logger.info("Loading model...")
