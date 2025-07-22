@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     device_ids:str = "0"
     devices_per_runner:int = 1
     max_queue_size:int = 4
+    model_runner:str = "tt-sdxl"
 
     model_config = SettingsConfigDict(env_file=".env") 
 

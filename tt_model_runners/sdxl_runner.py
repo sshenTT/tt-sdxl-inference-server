@@ -1,6 +1,5 @@
-import os
-from typing import List
 from tests.scripts.common import get_dispatch_core_type, get_updated_device_params
+from tt_model_runners.base_device_runner import DeviceRunner
 from utils.logger import TTLogger
 import ttnn
 import torch
@@ -16,7 +15,7 @@ from models.experimental.stable_diffusion_xl_base.tests.test_common import (
 )
 from models.utility_functions import profiler
 
-class TTSDXLRunner:
+class TTSDXLRunner(DeviceRunner):
     device = None
     batch_size = 0
     tt_unet = None

@@ -5,7 +5,6 @@ from config.settings import settings
 
 # model and worker are singleton
 current_model_holder = None
-current_worker_holder = None
 
 def model_resolver() -> BaseModel:
     global current_model_holder
@@ -15,9 +14,3 @@ def model_resolver() -> BaseModel:
             current_model_holder = SDXLService()
         return current_model_holder    
     return BaseModel()
-
-# def worker_resolver() -> TaskWorker:
-#     global current_worker_holder
-#     if (current_worker_holder is None):
-#         current_worker_holder = TaskWorker()
-#     return current_worker_holder
