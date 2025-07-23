@@ -3,9 +3,10 @@
 # SPDX-FileCopyrightText: © 2024 Tenstorrent AI ULC
 
 # default base image, override with --build-arg TT_METAL_DOCKERFILE_VERSION=<version>
-ARG TT_METAL_DOCKERFILE_VERSION
+ARG TT_METAL_DOCKERFILE_VERSION=v0.53.0-rc34
 
-FROM ghcr.io/tenstorrent/tt-metal/tt-metalium/ubuntu-20.04-amd64:$TT_METAL_DOCKERFILE_VERSION-dev
+#FROM ghcr.io/tenstorrent/tt-metal/tt-metalium/ubuntu-20.04-amd64:$TT_METAL_DOCKERFILE_VERSION-dev
+FROM ghcr.io/tenstorrent/tt-metal/tt-metalium/ubuntu-22.04-dev-amd64:latest
 
 # Build stage
 LABEL maintainer="Igor Djuric <idjuric@tenstorrent.com>"
@@ -56,7 +57,6 @@ RUN git clone https://github.com/tenstorrent-metal/tt-metal.git ${TT_METAL_HOME}
     && cd ${TT_METAL_HOME} \
     && git checkout ${TT_METAL_COMMIT_SHA_OR_TAG} \
     && git submodule update --init --recursive \
-    && git submodule foreach 'git lfs fetch --all && git lfs pull' \
     && bash ./build_metal.sh \
     && bash ./create_venv.sh
 
