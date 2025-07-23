@@ -1,4 +1,5 @@
-from tests.scripts.common import get_dispatch_core_type, get_updated_device_params
+import asyncio
+from tests.scripts.common import get_updated_device_params
 from tt_model_runners.base_device_runner import DeviceRunner
 from utils.logger import TTLogger
 import ttnn
@@ -91,38 +92,55 @@ class TTSDXLRunner(DeviceRunner):
 
         self.batch_size = self.ttnn_device.get_num_devices()
 
-        with ttnn.distribute(ttnn.ReplicateTensorToMesh(self.ttnn_device)):
-            # 2. Load tt_unet, tt_vae and tt_scheduler
-            tt_model_config = ModelOptimisations()
-            self.tt_unet = TtUNet2DConditionModel(
-                self.ttnn_device,
-                self.pipeline.unet.state_dict(),
-                "unet",
-                model_config=tt_model_config,
-            )
-            self.tt_vae = (
-                TtAutoencoderKL(self.ttnn_device, self.pipeline.vae.state_dict(), tt_model_config, self.batch_size)
-            )
-            self.tt_scheduler = TtEulerDiscreteScheduler(
-                self.ttnn_device,
-                self.pipeline.scheduler.config.num_train_timesteps,
-                self.pipeline.scheduler.config.beta_start,
-                self.pipeline.scheduler.config.beta_end,
-                self.pipeline.scheduler.config.beta_schedule,
-                self.pipeline.scheduler.config.trained_betas,
-                self.pipeline.scheduler.config.prediction_type,
-                self.pipeline.scheduler.config.interpolation_type,
-                self.pipeline.scheduler.config.use_karras_sigmas,
-                self.pipeline.scheduler.config.use_exponential_sigmas,
-                self.pipeline.scheduler.config.use_beta_sigmas,
-                self.pipeline.scheduler.config.sigma_min,
-                self.pipeline.scheduler.config.sigma_max,
-                self.pipeline.scheduler.config.timestep_spacing,
-                self.pipeline.scheduler.config.timestep_type,
-                self.pipeline.scheduler.config.steps_offset,
-                self.pipeline.scheduler.config.rescale_betas_zero_snr,
-                self.pipeline.scheduler.config.final_sigmas_type,
-            )
+        def distribute_block():
+            try:
+                with ttnn.distribute(ttnn.ReplicateTensorToMesh(self.ttnn_device)):
+                    tt_model_config = ModelOptimisations()
+                    self.tt_unet = TtUNet2DConditionModel(
+                        self.ttnn_device,
+                        self.pipeline.unet.state_dict(),
+                        "unet",
+                        model_config=tt_model_config,
+                    )
+                    self.tt_vae = (
+                        TtAutoencoderKL(self.ttnn_device, self.pipeline.vae.state_dict(), tt_model_config, self.batch_size)
+                    )
+                    self.tt_scheduler = TtEulerDiscreteScheduler(
+                        self.ttnn_device,
+                        self.pipeline.scheduler.config.num_train_timesteps,
+                        self.pipeline.scheduler.config.beta_start,
+                        self.pipeline.scheduler.config.beta_end,
+                        self.pipeline.scheduler.config.beta_schedule,
+                        self.pipeline.scheduler.config.trained_betas,
+                        self.pipeline.scheduler.config.prediction_type,
+                        self.pipeline.scheduler.config.interpolation_type,
+                        self.pipeline.scheduler.config.use_karras_sigmas,
+                        self.pipeline.scheduler.config.use_exponential_sigmas,
+                        self.pipeline.scheduler.config.use_beta_sigmas,
+                        self.pipeline.scheduler.config.sigma_min,
+                        self.pipeline.scheduler.config.sigma_max,
+                        self.pipeline.scheduler.config.timestep_spacing,
+                        self.pipeline.scheduler.config.timestep_type,
+                        self.pipeline.scheduler.config.steps_offset,
+                        self.pipeline.scheduler.config.rescale_betas_zero_snr,
+                        self.pipeline.scheduler.config.final_sigmas_type,
+                    )
+            except Exception as e:
+                self.logger.error(f"Error in ttnn.distribute block: {e}")
+                raise
+
+        # 6 minutes to distribute the model on device
+        weights_distribution_timeout = 360
+
+        try:
+            await asyncio.wait_for(asyncio.to_thread(distribute_block), timeout=weights_distribution_timeout)
+        except asyncio.TimeoutError:
+            self.logger.error(f"ttnn.distribute block timed out after {weights_distribution_timeout} seconds")
+            raise
+        except Exception as e:
+            self.logger.error(f"Exception during model loading: {e}")
+            raise
+
         self.pipeline.scheduler = self.tt_scheduler
 
         self.logger.info("Model loaded successfully")

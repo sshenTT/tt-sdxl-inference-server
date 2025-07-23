@@ -22,12 +22,14 @@ class Scheduler:
         self.warmup_signals_queue = Queue(worker_count)
         self.task_queue = Queue(self._get_max_queue_size(settings))
         self.result_queue = Queue()
+        self.error_queue = Queue()
         self.result_futures = {}
         self.workers = []
         self.ready_devices = []
         # init queue
         self.listener_task_ref = None
         self.device_warmup_listener_ref = None
+        self.error_queue_listener_ref = None
         self.listener_running = True
         self.device_warmup_listener_running = True
 
@@ -53,10 +55,12 @@ class Scheduler:
 
         # keep device warmup listener in the main event loop, it'll close soon
         self.device_warmup_listener_ref = asyncio.create_task(self.device_warmup_listener())
+        # keep error listener in the main event loop
+        self.error_queue_listener_ref = asyncio.create_task(self.error_listener())
 
         # Spawn one process per worker
         for i in range(self.worker_count):
-            p = Process(target=device_worker, args=(i, self.task_queue, self.result_queue, self.warmup_signals_queue))
+            p = Process(target=device_worker, args=(i, self.task_queue, self.result_queue, self.warmup_signals_queue, self.error_queue))
             p.start()
             self.workers.append(p)
         self.logger.info(f"Workers started: {self.worker_count}")
@@ -64,10 +68,28 @@ class Scheduler:
     async def result_listener(self):
         while self.listener_running:
             task_id, image = await asyncio.to_thread(self.result_queue.get)
+            if task_id is None:
+                self.listener_running = False
+                self.listener_task_ref.cancel()
+                break
             future = self.result_futures.pop(task_id, None)
             if future:
                 future.set_result(image)
         self.logger.info("Result listener stopped")
+
+    async def error_listener(self):
+        while self.listener_running:
+            task_id, error = await asyncio.to_thread(self.error_queue.get)
+            if task_id is None:
+                self.listener_running = False
+                self.error_queue_listener_ref.cancel()
+                break
+            self.logger.error(f"Error in worker {task_id}: {error}")
+            # TODO add error handling for device startup error
+            future = self.result_futures.pop(task_id, None)
+            if future:
+                future.set_exception(Exception(error))
+        self.logger.info("Error listener stopped")
 
     async def device_warmup_listener(self):
         while self.device_warmup_listener_running == True:
@@ -81,28 +103,26 @@ class Scheduler:
                 self.device_warmup_listener_running = False
                 # close queue, we're done
                 self._close_queues([self.warmup_signals_queue])
-        self.logger.info("Device warmup listener stopped")
+        self.logger.info("Device warmup listener is done")
 
 
     def stopWorkers(self):
         self.logger.info("Stopping workers")
-        self.listener_running = False
-        self.device_warmup_listener_running = False
-        if self.listener_task_ref:
-            self.listener_task_ref.cancel()
         for worker in self.workers:
             self.task_queue.put(None)
             worker.kill()
             worker.join()
         self.workers.clear()
-        # Clean up queueus
-        self._close_queues([self.task_queue, self.result_queue, self.warmup_signals_queue])
+        self.result_queue.put((None, None))  # Stop the result listener
+        self.error_queue.put((None, None))  # Stop the error listener
         if self.device_warmup_listener_ref:
             self.device_warmup_listener_ref.cancel()
         self.result_futures.clear()
+        # Clean up queues
+        self._close_queues([self.task_queue, self.result_queue, self.warmup_signals_queue, self.error_queue])
         self.isReady = False
         self.logger.info("Workers stopped")
-    
+
     def _getWorkerCount(self, setttings: Settings) -> int:
         try:
             workerCount = len(setttings.device_ids.split(","))
@@ -113,7 +133,7 @@ class Scheduler:
         except Exception as e:
             self.logger.error(f"Erros getting workers cannot: {e}")
             raise HTTPException(status_code=500, detail="Workers cannot be initialized")
-    
+
     def _get_max_queue_size(self, settings: Settings) -> int:
         try:
             max_queue_size = settings.max_queue_size
@@ -134,5 +154,5 @@ class Scheduler:
                 queues_closed += 1
             except Exception as e:
                 self.logger.error(f"Error closing queue #{idx}: {e}")
-            
+
         self.logger.info(f"Queues ({queues_closed}) closed successfully")

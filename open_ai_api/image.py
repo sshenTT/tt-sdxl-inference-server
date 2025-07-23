@@ -10,7 +10,10 @@ router = APIRouter()
 
 @router.post('/generations')
 async def generateImage(imageGenerateRequest: ImageGenerateRequest, service: BaseModel = Depends(model_resolver), api_key: str = Security(get_api_key)):
-    result = await service.processImage(imageGenerateRequest)
+    try:
+        result = await service.processImage(imageGenerateRequest)
+    except Exception as e:
+        return Response(status_code=500, content=str(e))
     return Response(content=result, media_type="image/png")
 
 @router.get('/tt-liveness')

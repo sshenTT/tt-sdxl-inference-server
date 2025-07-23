@@ -1,6 +1,7 @@
 import asyncio
-import time
 from uuid import uuid4
+
+from fastapi import HTTPException
 
 from domain.image_generate_request import ImageGenerateRequest
 from model_services.device_worker import device_worker
@@ -26,7 +27,11 @@ class SDXLService(BaseModel):
         self.scheduler.process_request(imageGenerateRequest)
         future = asyncio.get_running_loop().create_future()
         self.scheduler.result_futures[task_id] = future
-        result = await future
+        try:
+            result = await future
+        except Exception as e:
+            self.logger.error(f"Error processing image: {e}")
+            raise e
         # pop the future from the result_futures to avoid memory leaks
         self.scheduler.result_futures.pop(task_id, None)
         return result
