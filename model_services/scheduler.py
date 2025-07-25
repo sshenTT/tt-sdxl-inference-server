@@ -6,8 +6,10 @@ from multiprocessing import Process, Queue
 from fastapi import HTTPException
 from config.settings import Settings, get_settings
 from model_services.device_worker import device_worker
+from tt_model_runners.runner_fabric import get_device_runner
 from utils.helpers import log_execution_time
 from utils.logger import TTLogger
+import ttnn
 
 
 class Scheduler:
@@ -57,6 +59,9 @@ class Scheduler:
         self.device_warmup_listener_ref = asyncio.create_task(self.device_warmup_listener())
         # keep error listener in the main event loop
         self.error_queue_listener_ref = asyncio.create_task(self.error_listener())
+
+        # device =  get_device_runner(0).get_device()
+        # submesh_devices = device.create_submeshes(ttnn.MeshShape(1, 1))
 
         # Spawn one process per worker
         for i in range(self.worker_count):

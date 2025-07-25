@@ -26,14 +26,13 @@ class TTSDXLRunner(DeviceRunner):
     ttnn_text_embeds = None
     ttnn_timesteps = []
     extra_step_kwargs = None
-    guidance_scale = 5.0
     scaling_factor = None
     tt_vae = None
     pipeline = None
     latents = None
 
-    def __init__(self):
-        pass
+    def __init__(self, device_id: str):
+        super().__init__(device_id)
         self.logger = TTLogger()
 
     def _set_fabric(self,fabric_config):
@@ -44,6 +43,10 @@ class TTSDXLRunner(DeviceRunner):
     def _reset_fabric(self, fabric_config):
         if fabric_config:
             ttnn.set_fabric_config(ttnn.FabricConfig.DISABLED)
+
+    def get_device(self):
+        # for now use all availalbe devices
+        return self._mesh_device()
 
     def _mesh_device(self):
         device_params = {'l1_small_size': 57344}
@@ -82,6 +85,7 @@ class TTSDXLRunner(DeviceRunner):
         self.ttnn_device = self._mesh_device()
 
         # 1. Load components
+        # TODO check how to point to a model file
         self.pipeline = DiffusionPipeline.from_pretrained(
             "stabilityai/stable-diffusion-xl-base-1.0",
             torch_dtype=torch.float32,
@@ -173,7 +177,7 @@ class TTSDXLRunner(DeviceRunner):
         all_embeds = [
             self.pipeline.encode_prompt(
                 prompt=prompt,
-                prompt_2=None,
+                prompt_2=None, # Negative prompt
                 device=cpu_device,
                 num_images_per_prompt=1,
                 do_classifier_free_guidance=True,
@@ -315,7 +319,6 @@ class TTSDXLRunner(DeviceRunner):
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
             mesh_mapper=ttnn.ReplicateTensorToMesh(self.ttnn_device),
         )
-
 
         images = []
         self.logger.info("Starting ttnn inference...")

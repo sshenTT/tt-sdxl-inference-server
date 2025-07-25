@@ -1,6 +1,10 @@
 from abc import abstractmethod
 
 class DeviceRunner:
+    device_id: str = None
+
+    def __init__(self, device_id: str):
+        self.device_id = device_id
 
     @abstractmethod
     def load_model(self):
@@ -12,4 +16,8 @@ class DeviceRunner:
 
     @abstractmethod
     def close_device(self):
+        pass
+
+    @abstractmethod
+    def get_device(self):
         pass
