@@ -5,19 +5,19 @@
       "name": "Python: FastAPI",
       "type": "python",
       "request": "launch",
+      "python": "/localdev/idjuric/tt-metal/python_env/bin/python",
       "module": "uvicorn",
       "args": [
         "main:app",        // Replace with your actual module path
         "--reload",
         "--port", "9006",
-        "-lifespan", "on", // Ensures lifespan events are handled
+        "--lifespan", "on", // Ensures lifespan events are handled
         "--workers", "1"
       ],
         "env": {
             "ARCH_NAME": "wormhole_b0",
             "ENVIRONMENT": "development",
-            "PYTHONPATH": "/opt/venv/bin/python3",
-            "TT_METAL_HOME": "/proj_sw/user_dev/idjuric/tt-metal",
+            "TT_METAL_HOME": "/localdev/idjuric/tt-metal",
             "WH_ARCH_YAML": "wormhole_b0_80_arch_eth_dispatch.yaml", // Required when running a single-chip app on n300 
         },
       "console": "integratedTerminal"
