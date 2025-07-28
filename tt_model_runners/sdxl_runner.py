@@ -1,4 +1,5 @@
 import asyncio
+from typing import List
 from tests.scripts.common import get_updated_device_params
 from tt_model_runners.base_device_runner import DeviceRunner
 from utils.logger import TTLogger
@@ -75,14 +76,21 @@ class TTSDXLRunner(DeviceRunner):
         self.logger.info(f"multidevice with {mesh_device.get_num_devices()} devices is created")
         return mesh_device
 
+    def sub_mesh_devices(self) -> List[ttnn.MeshDevice]:
+        device = self._mesh_device()
+        return device.create_submeshes(ttnn.MeshShape(1, 1))
+
     def close_device(self) -> bool:
         for submesh in self.mesh_device.get_submeshes():
             ttnn.close_mesh_device(submesh)
         ttnn.close_mesh_device(self.mesh_device)
 
-    async def load_model(self)->bool:
+    async def load_model(self, device)->bool:
         self.logger.info("Loading model...")
-        self.ttnn_device = self._mesh_device()
+        if (device is None):
+            self.ttnn_device = self._mesh_device()
+        else:
+            self.ttnn_device = device
 
         # 1. Load components
         # TODO check how to point to a model file
