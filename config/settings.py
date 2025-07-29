@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     devices_per_runner:int = 1
     max_queue_size:int = 4
     model_runner:str = "tt-sdxl"
+    #model_runner:str = "tt-sd3.5"
     device_mesh_shape:tuple = (1, 1)
     mock_devices_count:int = 5
     model_config = SettingsConfigDict(env_file=".env") 
