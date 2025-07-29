@@ -93,7 +93,7 @@ class   TTSD35Runner(DeviceRunner):
             self.ttnn_device = device
 
         # TODO chang this
-        model_version = "medium"
+        model_version = "large"
         guidance_scale = 5.0
 
         if guidance_scale > 1:
@@ -149,10 +149,5 @@ class   TTSD35Runner(DeviceRunner):
             num_inference_steps=num_inference_steps,
             seed=0,
         )
-
-        for idx, img in enumerate(images):
-            img = img.unsqueeze(0)
-            img = self.pipeline.image_processor.postprocess(img, output_type="pil")[0]
-            images.append(img)
 
         return images
