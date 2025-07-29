@@ -39,7 +39,7 @@ class SDXLService(BaseModel):
     def checkIsModelReady(self):
         return self.scheduler.checkIsModelReady()
 
-    @log_execution_time("Workes creation")
+    @log_execution_time("Starting workers")
     def startWorkers(self):
         self.scheduler.startWorkers()
 

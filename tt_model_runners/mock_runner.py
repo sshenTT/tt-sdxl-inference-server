@@ -1,4 +1,5 @@
 import time  # Add this import
+from config.settings import settings
 from tests.scripts.common import get_updated_device_params
 from tt_model_runners.base_device_runner import DeviceRunner
 from utils.logger import TTLogger
@@ -24,9 +25,13 @@ class MockRunner(DeviceRunner):
         self.logger.info(f"Model warmup completed on device {self.device_id}")
         return True
 
-    def get_device(self): 
-        self.logger.info(f"Getting device {self.device_id}")
-        return {"device_id": "MockDevice"}
+    def get_device(self, device_id: int): 
+        self.logger.info(f"Getting device {device_id or self.device_id}")
+        return {"device_id": device_id or "MockDevice"}
+
+    def get_devices(self):
+        self.logger.info("Getting all devices")
+        return [self.get_device() for _ in range(settings.mock_devices_count)]
 
     def runInference(self, prompt: str, num_inference_steps: int = 50):
         self.logger.info(f"Running inference for prompt: {prompt} with {num_inference_steps} steps")

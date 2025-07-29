@@ -52,7 +52,7 @@ class Scheduler:
             raise HTTPException(405, "Model is not ready")
         return True
 
-    @log_execution_time("Workes creation")
+    @log_execution_time("Scheduler image processing")
     def startWorkers(self):
         # keep result listener in the main event loop
         self.listener_task_ref = asyncio.create_task(self.result_listener())
@@ -62,11 +62,14 @@ class Scheduler:
         # keep error listener in the main event loop
         self.error_queue_listener_ref = asyncio.create_task(self.error_listener())
 
-        # device =  get_device_runner(0).get_device()
-        # submesh_devices = device.create_submeshes(ttnn.MeshShape(1, 1))
-        # Create mesh devices FIRST, before any async tasks
-        mesh_devices = TTSDXLRunner(0).sub_mesh_devices()
-        
+        # we initialize all the possible devices in the mesh
+        # config decides how big of meshes we create
+        mesh_devices = get_device_runner(0).get_devices()
+
+        if len(mesh_devices) == 0:
+            self.logger.error("No devices found in the mesh")
+            raise HTTPException(status_code=500, detail="No devices found in the mesh")
+
         for i in range(len(mesh_devices)):
             t = Thread(target=device_worker, args=(i, self.task_queue, self.result_queue, self.warmup_signals_queue, self.error_queue, mesh_devices[i]))
             t.daemon = True  # Daemon threads die when main thread exits

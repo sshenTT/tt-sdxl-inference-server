@@ -15,6 +15,7 @@ def device_worker(worker_id: str, task_queue: Queue, result_queue: Queue, warmup
     device_runner: DeviceRunner = get_device_runner(worker_id)
     try:
         # Create a new event loop for this thread to avoid conflicts
+        # most likely multiple devices will be running this in parallel
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
