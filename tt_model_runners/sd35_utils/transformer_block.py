@@ -280,11 +280,13 @@ class TtTransformerBlock:
         spatial += spatial_attn
         ttnn.deallocate(spatial_attn)
 
+        # TODO Check with Colman how to handle this
+        self._spatial_attn = None
         if self._spatial_attn is not None:
-            assert False, "Not supporting right now on Colman's branch"
-            assert spatial_gate_attn is not None
-            assert spatial_scale_attn is not None
-            assert spatial_shift_attn is not None
+            # assert False, "Not supporting right now on Colman's branch"
+            # assert spatial_gate_attn is not None
+            # assert spatial_scale_attn is not None
+            # assert spatial_shift_attn is not None
 
             spatial += self._spatial_attn_block(
                 spatial_normed, gate=spatial_gate_attn, scale=spatial_scale_attn, shift=spatial_shift_attn

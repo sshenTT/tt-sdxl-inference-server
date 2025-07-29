@@ -87,9 +87,7 @@ class TtStableDiffusion3Pipeline:
 
         num_devices = device.get_num_devices()
         ## heads padding for T3K TP
-        pad_embedding_dim = False
-        if os.environ["MESH_DEVICE"] == "T3K" and embedding_dim == 2432:
-            pad_embedding_dim = True
+        if os.environ.get("MESH_DEVICE") == "T3K" and embedding_dim == 2432:
             hidden_dim_padding = (
                 ((embedding_dim // num_devices // TILE_SIZE) + 1) * TILE_SIZE
             ) * num_devices - embedding_dim
@@ -168,95 +166,6 @@ class TtStableDiffusion3Pipeline:
         self._prepared_guidance_scale = guidance_scale
         self._prepared_max_t5_sequence_length = max_t5_sequence_length
         self._prepared_prompt_sequence_length = prompt_sequence_length
-
-        """
-        do_classifier_free_guidance = guidance_scale > 1
-
-        prompt_embeds, pooled_prompt_embeds = self._encode_prompts(
-            prompt_1=[""],
-            prompt_2=[""],
-            prompt_3=[""],
-            negative_prompt_1=[""],
-            negative_prompt_2=[""],
-            negative_prompt_3=[""],
-            num_images_per_prompt=num_images_per_prompt,
-            max_t5_sequence_length=max_t5_sequence_length,
-            do_classifier_free_guidance=do_classifier_free_guidance,
-        )
-
-        # TODO: pass the patch_size value
-        patch_size = 2
-        latents_shape = (
-            batch_size * num_images_per_prompt,
-            height // self._vae_scale_factor,
-            (width // self._vae_scale_factor) // patch_size,
-            self._num_channels_latents * patch_size,
-        )
-
-        tt_prompt_embeds = ttnn.from_torch(
-            prompt_embeds, device=self._device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat8_b,
-            mesh_mapper=ttnn.ReplicateTensorToMesh(self._device),
-        )
-        tt_pooled_prompt_embeds = ttnn.from_torch(
-            pooled_prompt_embeds, device=self._device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat16,
-            mesh_mapper=ttnn.ReplicateTensorToMesh(self._device),
-
-        )
-
-        tt_timestep = ttnn.allocate_tensor_on_device([batch_size * num_images_per_prompt * (1+do_classifier_free_guidance), 1], ttnn.float32, ttnn.ROW_MAJOR_LAYOUT, self._device)
-        tt_sigma_difference = ttnn.allocate_tensor_on_device([1, 1], ttnn.bfloat16, ttnn.TILE_LAYOUT, self._device)
-        tt_latents = ttnn.allocate_tensor_on_device(latents_shape, ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT, self._device)
-
-        self._device.disable_and_clear_program_cache()
-
-        # cache
-        self._step(
-            timestep=tt_timestep,
-            latents=tt_latents,
-            do_classifier_free_guidance=do_classifier_free_guidance,
-            prompt_embeds=tt_prompt_embeds,
-            pooled_prompt_embeds=tt_pooled_prompt_embeds,
-            guidance_scale=guidance_scale,
-            sigma_difference=tt_sigma_difference,
-            prompt_sequence_length=prompt_sequence_length,
-            spatial_sequence_length=spatial_sequence_length,
-        )
-        self._step(
-            timestep=tt_timestep,
-            latents=tt_latents,
-            do_classifier_free_guidance=do_classifier_free_guidance,
-            prompt_embeds=tt_prompt_embeds,
-            pooled_prompt_embeds=tt_pooled_prompt_embeds,
-            guidance_scale=guidance_scale,
-            sigma_difference=tt_sigma_difference,
-            prompt_sequence_length=prompt_sequence_length,
-            spatial_sequence_length=spatial_sequence_length,
-        )
-
-        # trace
-        tid = ttnn.begin_trace_capture(self._device)
-        self._step(
-            timestep=tt_timestep,
-            latents=tt_latents,
-            do_classifier_free_guidance=do_classifier_free_guidance,
-            prompt_embeds=tt_prompt_embeds,
-            pooled_prompt_embeds=tt_pooled_prompt_embeds,
-            guidance_scale=guidance_scale,
-            sigma_difference=tt_sigma_difference,
-            prompt_sequence_length=prompt_sequence_length,
-            spatial_sequence_length=spatial_sequence_length,
-        )
-        ttnn.end_trace_capture(self._device, tid)
-
-        self._trace = PipelineTrace(
-            tid=tid,
-            spatial_input_output=tt_latents,
-            prompt_input=tt_prompt_embeds,
-            pooled_projection_input=tt_pooled_prompt_embeds,
-            prompt_sequence_length=prompt_sequence_length,
-            spatial_sequence_length=spatial_sequence_length,
-        )
-        """
 
     def __call__(
         self,

@@ -136,14 +136,16 @@ class   TTSD35Runner(DeviceRunner):
 
         if isinstance(prompts, str):
             prompts = [prompts]
+        
+        negative_prompt = "bad quality, low resolution, blurry, dark, noisy, bad lighting, bad composition"
 
         images = self.pipeline(
             prompt_1=[prompts[0]],
-            # prompt_2=[prompt],
-            # prompt_3=[prompt],
-            # negative_prompt_1=[negative_prompt],
-            # negative_prompt_2=[negative_prompt],
-            # negative_prompt_3=[negative_prompt],
+            prompt_2=[prompt[0]],
+            prompt_3=[prompt[0]],
+            negative_prompt_1=[negative_prompt],
+            negative_prompt_2=[negative_prompt],
+            negative_prompt_3=[negative_prompt],
             num_inference_steps=num_inference_steps,
             seed=0,
         )
