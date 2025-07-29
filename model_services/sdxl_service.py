@@ -32,12 +32,18 @@ class SDXLService(BaseModel):
         except Exception as e:
             self.logger.error(f"Error processing image: {e}")
             raise e
-        # pop the future from the result_futures to avoid memory leaks
-        self.scheduler.result_futures.pop(task_id, None)
+        finally:
+            # pop the future from the result_futures to avoid memory leaks
+            self.scheduler.result_futures.pop(task_id, None)
         return result
 
     def checkIsModelReady(self):
-        return self.scheduler.checkIsModelReady()
+        """Detailed system status for monitoring"""
+        return {
+            'model_ready': self.scheduler.checkIsModelReady(),
+            'queue_size': self.scheduler.task_queue.qsize() if hasattr(self.scheduler.task_queue, 'qsize') else 'unknown',
+            'worker_count': len(self.scheduler.workers) if hasattr(self.scheduler, 'workers') else 'unknown'
+        }
 
     @log_execution_time("Starting workers")
     def startWorkers(self):

@@ -12,7 +12,7 @@ class BaseModel:
         pass
 
     @abstractmethod
-    def checkIsModelReady(self) -> bool:
+    def checkIsModelReady(self) -> dict:
         pass
 
     @abstractmethod
