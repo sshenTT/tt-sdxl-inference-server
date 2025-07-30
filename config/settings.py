@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -8,8 +9,9 @@ class Settings(BaseSettings):
     device_ids:str = "0"
     devices_per_runner:int = 1
     max_queue_size:int = 4
-    # model_runner:str = "tt-sdxl"
-    model_runner:str = "tt-sd3.5"
+    model_runner:str = "tt-sdxl"
+    #model_runner:str = "tt-sd3.5"
+    log_file: Optional[str] = None
     device_mesh_shape:tuple = (1, 1)
     mock_devices_count:int = 5
     model_config = SettingsConfigDict(env_file=".env") 

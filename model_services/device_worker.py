@@ -60,7 +60,8 @@ def device_worker(worker_id: str, task_queue: Queue, result_queue: Queue, warmup
             # Direct call - no thread pool needed since we're already in a thread
             images = device_runner.runInference(
                 imageGenerateRequest.prompt,
-                imageGenerateRequest.num_inference_step
+                imageGenerateRequest.num_inference_step,
+                imageGenerateRequest.negative_prompt or None
             )
             inference_successful = True
             timeout_timer.cancel()

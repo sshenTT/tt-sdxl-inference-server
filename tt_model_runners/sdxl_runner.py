@@ -169,7 +169,7 @@ class TTSDXLRunner(DeviceRunner):
 
         return True
 
-    def runInference(self, prompt: str, num_inference_steps: int = 50):
+    def runInference(self, prompt: str, num_inference_steps: int = 50, negative_prompt: str = None):
         prompts = [prompt]
 
         torch.manual_seed(0)
@@ -191,11 +191,11 @@ class TTSDXLRunner(DeviceRunner):
         all_embeds = [
             self.pipeline.encode_prompt(
                 prompt=prompt,
-                prompt_2=None, # Negative prompt
+                prompt_2=None,
                 device=cpu_device,
                 num_images_per_prompt=1,
                 do_classifier_free_guidance=True,
-                negative_prompt=None,
+                negative_prompt=negative_prompt,
                 negative_prompt_2=None,
                 prompt_embeds=None,
                 negative_prompt_embeds=None,
