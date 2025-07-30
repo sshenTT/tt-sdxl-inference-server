@@ -10,7 +10,7 @@
       "args": [
         "main:app",        // Replace with your actual module path
         "--reload",
-        "--port", "8002",
+        "--port", "8003",
         "--lifespan", "on", // Ensures lifespan events are handled
         "--workers", "1"
       ],

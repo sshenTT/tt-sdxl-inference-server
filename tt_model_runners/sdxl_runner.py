@@ -80,12 +80,16 @@ class TTSDXLRunner(DeviceRunner):
     def get_devices(self) -> List[ttnn.MeshDevice]:
         device = self._mesh_device()
         device_shape = settings.device_mesh_shape
-        return device.create_submeshes(ttnn.MeshShape(*device_shape))
+        return (device, device.create_submeshes(ttnn.MeshShape(*device_shape)))
 
-    def close_device(self) -> bool:
-        for submesh in self.mesh_device.get_submeshes():
-            ttnn.close_mesh_device(submesh)
-        ttnn.close_mesh_device(self.mesh_device)
+    def close_device(self, device) -> bool:
+        if device is None:
+            for submesh in self.mesh_device.get_submeshes():
+                ttnn.close_mesh_device(submesh)
+            ttnn.close_mesh_device(self.mesh_device)
+        else:
+            ttnn.close_mesh_device(device)
+        return True
 
     async def load_model(self, device)->bool:
         self.logger.info("Loading model...")

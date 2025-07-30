@@ -31,7 +31,7 @@ class MockRunner(DeviceRunner):
 
     def get_devices(self):
         self.logger.info("Getting all devices")
-        return [self.get_device() for _ in range(settings.mock_devices_count)]
+        return (self.get_device() ,[self.get_device() for _ in range(settings.mock_devices_count)])
 
     def runInference(self, prompt: str, num_inference_steps: int = 50):
         self.logger.info(f"Running inference for prompt: {prompt} with {num_inference_steps} steps")
