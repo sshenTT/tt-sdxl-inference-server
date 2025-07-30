@@ -96,7 +96,11 @@ class Scheduler:
             raise HTTPException(status_code=500, detail="No devices found in the mesh")
 
         for i in range(len(mesh_devices)):
-            t = Thread(target=device_worker, args=(i, self.task_queue, self.result_queue, self.warmup_signals_queue, self.error_queue, mesh_devices[i]))
+            t = Thread(
+                target=device_worker, 
+                args=(i, self.task_queue, self.result_queue, self.warmup_signals_queue, self.error_queue, mesh_devices[i]),
+                name=f"DeviceWorker-{i}"
+            )
             t.daemon = True  # Daemon threads die when main thread exits
             t.start()
             self.workers.append(t)

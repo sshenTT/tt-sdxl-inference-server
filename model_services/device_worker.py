@@ -1,7 +1,6 @@
 from queue import Queue
 import asyncio
 
-import concurrent
 import threading
 
 from domain.image_generate_request import ImageGenerateRequest
@@ -43,14 +42,16 @@ def device_worker(worker_id: str, task_queue: Queue, result_queue: Queue, warmup
         images = None
 
         inference_successful = False
+        timer_ran_out = False
         # TODO revert this since timeout handler does not continue!!!!
         def timeout_handler():
-            nonlocal inference_successful
+            nonlocal inference_successful, timer_ran_out
             if not inference_successful:
                 logger.error(f"Worker {worker_id} task {imageGenerateRequest._task_id} timed out after {inferencing_timeout}s")
                 error_msg = f"Worker {worker_id} timed out: {inferencing_timeout}s num inference steps {imageGenerateRequest.num_inference_step}"
                 error_queue.put((imageGenerateRequest._task_id, error_msg))
                 logger.info("Still waiting for inference to complete, we're not stopping worker {worker_id} ")
+                timer_ran_out = True
 
         timeout_timer = threading.Timer(inferencing_timeout, timeout_handler)
         timeout_timer.start()
@@ -71,12 +72,17 @@ def device_worker(worker_id: str, task_queue: Queue, result_queue: Queue, warmup
         except Exception as e:
             timeout_timer.cancel()
             error_msg = f"Worker {worker_id} inference error: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            logger.error(error_msg)
             error_queue.put((imageGenerateRequest._task_id, error_msg))
             continue
 
         logger.debug(f"Worker {worker_id} finished processing task: {imageGenerateRequest}")
-        # Process result
+
+        # Process result only if timer didn't run out
+        # Prevents memory leaks
+        if timer_ran_out:
+            logger.warning(f"Worker {worker_id} task {imageGenerateRequest._task_id} ran out of time, skipping result processing")
+            continue
         try:
             image = ImageManager("img").convertImageToBytes(images[0])
             result_queue.put((imageGenerateRequest._task_id, image))
