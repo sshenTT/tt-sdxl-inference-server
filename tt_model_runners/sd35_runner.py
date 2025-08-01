@@ -134,23 +134,32 @@ class   TTSD35Runner(DeviceRunner):
 
         return True
 
-    def runInference(self, prompt: str, num_inference_steps: int = 50, negative_prompt: str = None):
-        prompts = [prompt]
-
+    def runInference(self, prompts: list[str], num_inference_steps: int = 50, negative_prompt: str = None):
+        """Run inference on a batch of prompts.
+        
+        Args:
+            prompts: List of prompts to process
+            num_inference_steps: Number of denoising steps
+            negative_prompt: Optional negative prompt (defaults to standard quality settings)
+        """
         torch.manual_seed(0)
 
+        # Handle single prompt passed as string
         if isinstance(prompts, str):
             prompts = [prompts]
         
-        negative_prompt = "bad quality, low resolution, blurry, dark, noisy, bad lighting, bad composition"
+        # Default negative prompt for quality control
+        if negative_prompt is None:
+            negative_prompt = "bad quality, low resolution, blurry, dark, noisy, bad lighting, bad composition"
 
+        # Each prompt needs to be a list of strings
         images = self.pipeline(
-            prompt_1=[prompts[0]],
-            prompt_2=[prompt[0]],
-            prompt_3=[prompt[0]],
-            negative_prompt_1=[negative_prompt],
-            negative_prompt_2=[negative_prompt],
-            negative_prompt_3=[negative_prompt],
+            prompt_1=prompts,  # List of prompts for first encoder
+            prompt_2=prompts,  # Same prompts for second encoder
+            prompt_3=prompts,  # Same prompts for third encoder
+            negative_prompt_1=[negative_prompt] * len(prompts),  # Match batch size
+            negative_prompt_2=[negative_prompt] * len(prompts),  # Match batch size
+            negative_prompt_3=[negative_prompt] * len(prompts),  # Match batch size
             num_inference_steps=num_inference_steps,
             seed=0,
         )
