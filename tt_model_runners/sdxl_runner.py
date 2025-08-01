@@ -169,12 +169,7 @@ class TTSDXLRunner(DeviceRunner):
 
         return True
 
-    def runInference(self, prompt: str, num_inference_steps: int = 50, negative_prompt: str = None):
-        prompts = [prompt]
-
-        # TODO remove this
-        # torch.manual_seed(0)
-
+    def runInference(self, prompts: list[str], num_inference_steps: int = 50, negative_prompt: str = None):
         if isinstance(prompts, str):
             prompts = [prompts]
 

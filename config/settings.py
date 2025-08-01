@@ -9,7 +9,9 @@ class Settings(BaseSettings):
     device_ids:str = "0"
     devices_per_runner:int = 1
     max_queue_size:int = 4
+    max_batch_size:int = 4
     model_runner:str = "tt-sdxl"
+    num_inference_steps:int = 30 # has to be hardcoded since we cannnot allow per image currently
     #model_runner:str = "tt-sd3.5"
     log_file: Optional[str] = None
     device_mesh_shape:tuple = (1, 1)

@@ -10,7 +10,7 @@
       "args": [
         "main:app",        // Replace with your actual module path
         "--reload",
-        "--port", "8003",
+        "--port", "8009",
         "--lifespan", "on", // Ensures lifespan events are handled
         "--workers", "1"
       ],
@@ -18,6 +18,7 @@
             "ARCH_NAME": "wormhole_b0",
             "ENVIRONMENT": "development",
             "TT_METAL_HOME": "/localdev/idjuric/tt-metal",
+            "PYTHONPATH": "/localdev/idjuric/tt-metal",
             "WH_ARCH_YAML": "wormhole_b0_80_arch_eth_dispatch.yaml", // Required when running a single-chip app on n300 
         },
       "console": "integratedTerminal"

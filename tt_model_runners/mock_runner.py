@@ -21,7 +21,7 @@ class MockRunner(DeviceRunner):
         self.logger.info("Loading model...")
         time.sleep(10)  # Use time.sleep() instead of await asyncio.sleep()
         self.logger.info(f"Model loaded successfully on device {self.device_id}")
-        time.sleep(30)  # Use time.sleep() instead of await asyncio.sleep()
+        time.sleep(10)  # Use time.sleep() instead of await asyncio.sleep()
         self.logger.info(f"Model warmup completed on device {self.device_id}")
         return True
 

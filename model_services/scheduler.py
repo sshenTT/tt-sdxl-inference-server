@@ -1,6 +1,6 @@
 import asyncio
-from threading import Lock, Thread
-from queue import Queue
+from multiprocessing import Process, Queue as Queue  # Need multiprocessing queues
+from threading import Lock
 
 from fastapi import HTTPException
 from config.settings import Settings, get_settings
@@ -20,7 +20,7 @@ class Scheduler:
         self.isReady = False
         worker_count = self._getWorkerCount(settings)
         self.worker_count = worker_count
-        # a queue containting signals for warmup
+        # For multiprocessing, need multiprocessing queues
         self.warmup_signals_queue = Queue(worker_count)
         self.task_queue = Queue(self._get_max_queue_size(settings))
         self.result_queue = Queue()
@@ -87,24 +87,15 @@ class Scheduler:
         # keep error listener in the main event loop
         self.error_queue_listener_ref = asyncio.create_task(self.error_listener())
 
-        # we initialize all the possible devices in the mesh
-        # config decides how big of meshes we create
-        (self.main_device, mesh_devices) = get_device_runner(0).get_devices()
-
-        if len(mesh_devices) == 0:
-            self.logger.error("No devices found in the mesh")
-            raise HTTPException(status_code=500, detail="No devices found in the mesh")
-
-        for i in range(len(mesh_devices)):
-            t = Thread(
+        for i in range(self.worker_count):
+            p = Process(
                 target=device_worker, 
-                args=(i, self.task_queue, self.result_queue, self.warmup_signals_queue, self.error_queue, mesh_devices[i]),
+                args=(i, self.task_queue, self.result_queue, self.warmup_signals_queue, self.error_queue),
                 name=f"DeviceWorker-{i}"
             )
-            t.daemon = True  # Daemon threads die when main thread exits
-            t.start()
-            self.workers.append(t)
-        self.logger.info(f"Workers started: {len(mesh_devices)}")
+            p.start()
+            self.workers.append(p)
+        self.logger.info(f"Workers started: {1}")
 
     async def result_listener(self):
         while self.listener_running:
@@ -126,6 +117,8 @@ class Scheduler:
             except Exception as e:
                 self.logger.error(f"Error in result_listener: {e}", exc_info=True)
         
+        self.warmup_signals_queue.put(None, timeout=1.0)
+        self._close_queues([self.warmup_signals_queue])
         self.logger.info("Result listener stopped")
 
     async def error_listener(self):
@@ -191,12 +184,16 @@ class Scheduler:
                 except:
                     self.logger.warning("Timeout sending shutdown signal to worker")
             
-            # Wait for threads to finish gracefully
+            # Wait for processes to finish gracefully
             for i, worker in enumerate(self.workers):
                 if worker.is_alive():
                     worker.join(timeout=10.0)  # Increased timeout
                     if worker.is_alive():
                         self.logger.warning(f"Worker {i} did not shutdown gracefully")
+                        worker.terminate()  # Terminate process (not kill)
+                        worker.join(timeout=2.0)  # Wait for termination
+                        if worker.is_alive():
+                            worker.kill()  # Force kill as last resort
             
             self.workers.clear()
             
@@ -211,7 +208,14 @@ class Scheduler:
                 self.warmup_signals_queue.put(None, timeout=1.0)
             except:
                 self.logger.warning("Timeout sending shutdown signals to listeners")
-            
+
+            # close queues
+            self._close_queues(
+                [self.task_queue, 
+                 self.result_queue, 
+                 self.warmup_signals_queue, 
+                 self.error_queue])
+
             # Cancel any remaining futures
             with self.result_futures_lock:
                 for task_id, future in self.result_futures.items():
@@ -233,6 +237,18 @@ class Scheduler:
             
         except Exception as e:
             self.logger.error(f"Error during worker shutdown: {e}", exc_info=True)
+
+    def _close_queues(self, queues: list[Queue]):
+        queues_closed = 0
+        for idx, queue in enumerate(queues):
+            try:
+                queue.close()
+                queue.join_thread()
+                queues_closed += 1
+            except Exception as e:
+                self.logger.error(f"Error closing queue #{idx}: {e}")
+
+        self.logger.info(f"Queues ({queues_closed}) closed successfully")
 
     def _getWorkerCount(self, setttings: Settings) -> int:
         try:

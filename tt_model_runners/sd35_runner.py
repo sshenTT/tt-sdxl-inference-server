@@ -17,23 +17,24 @@ from models.experimental.stable_diffusion_xl_base.tt.model_configs import ModelO
 from models.utility_functions import profiler
 
 class   TTSD35Runner(DeviceRunner):
-    device = None
-    batch_size = 0
-    tt_unet = None
-    tt_scheduler = None
-    ttnn_prompt_embeds = None
-    ttnn_time_ids = None
-    ttnn_text_embeds = None
-    ttnn_timesteps = []
-    extra_step_kwargs = None
-    scaling_factor = None
-    tt_vae = None
-    pipeline = None
-    latents = None
-
     def __init__(self, device_id: str):
         super().__init__(device_id)
         self.logger = TTLogger()
+        
+        # Initialize all instance variables to avoid sharing across instances
+        self.device = None
+        self.batch_size = 0
+        self.tt_unet = None
+        self.tt_scheduler = None
+        self.ttnn_prompt_embeds = None
+        self.ttnn_time_ids = None
+        self.ttnn_text_embeds = None
+        self.ttnn_timesteps = []
+        self.extra_step_kwargs = None
+        self.scaling_factor = None
+        self.tt_vae = None
+        self.pipeline = None
+        self.latents = None
 
     def _set_fabric(self,fabric_config):
         # If fabric_config is not None, set it to fabric_config
