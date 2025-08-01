@@ -54,7 +54,6 @@ def device_worker(worker_id: str, task_queue: Queue, result_queue: Queue, warmup
             # Direct call - no thread pool needed since we're already in a thread
             images = device_runner.runInference(
                 [request.prompt for request in imageGenerateRequests],
-                # imageGenerateRequests[0].num_inference_step
                 settings.num_inference_steps
             )
             inference_successful = True
@@ -107,6 +106,9 @@ def get_greedy_batch(task_queue, max_batch_size):
         if first_item is None:
             return [None]
         batch.append(first_item)
+    except KeyboardInterrupt:
+        logger.warning("KeyboardInterrupt received - shutting down gracefully")
+        return [None]
     except Exception as e:
         logger.error(f"Error getting first item from queue: {e}")
         # Handle case where queue is empty or other error

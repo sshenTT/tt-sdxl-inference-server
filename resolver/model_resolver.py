@@ -1,5 +1,5 @@
 from model_services.base_model import BaseModel
-from model_services.sdxl_service import SDXLService
+from model_services.image_service import ImageService
 from config.settings import settings
 # from model_services.task_worker import TaskWorker
 
@@ -8,9 +8,9 @@ current_model_holder = None
 
 def model_resolver() -> BaseModel:
     global current_model_holder
-    model_in_use = settings.model_in_use
-    if model_in_use == "SDXL":
+    model_service = settings.model_service
+    if model_service == "image":
         if (current_model_holder is None):
-            current_model_holder = SDXLService()
+            current_model_holder = ImageService()
         return current_model_holder    
     return BaseModel()

@@ -45,7 +45,7 @@ For development running:
 
 # Environment variables
 
-MODEL_IN_USE - SDXL
+model_service - image
 LOG_LEVEL - CRITICAL = 50
     FATAL = CRITICAL
     ERROR = 40

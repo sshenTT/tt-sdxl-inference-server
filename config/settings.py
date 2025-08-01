@@ -3,7 +3,7 @@ from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    model_in_use:str = "SDXL"
+    model_service:str = "image"
     log_level:str = "INFO"
     environment:str = "development"
     device_ids:str = "0"

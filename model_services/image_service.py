@@ -10,7 +10,7 @@ from resolver.scheduler_resolver import get_scheduler
 from utils.helpers import log_execution_time
 from utils.logger import TTLogger
 
-class SDXLService(BaseModel):
+class ImageService(BaseModel):
 
     @log_execution_time("SDXL service init")
     def __init__(self):
