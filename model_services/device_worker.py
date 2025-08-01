@@ -17,7 +17,11 @@ def device_worker(worker_id: str, task_queue: Queue, result_queue: Queue, warmup
         device_runner: DeviceRunner = get_device_runner(worker_id)
         device = device_runner.get_device()
         # No need for separate event loop in separate process - each process has its own interpreter
-        asyncio.run(device_runner.load_model(device))
+        try:
+            asyncio.run(device_runner.load_model(device))
+        except KeyboardInterrupt:
+            logger.warning(f"Worker {worker_id} interrupted during model loading - shutting down")
+            return
     except Exception as e:
         logger.error(f"Failed to get device runner: {e}")
         error_queue.put((worker_id, str(e)))
@@ -33,7 +37,8 @@ def device_worker(worker_id: str, task_queue: Queue, result_queue: Queue, warmup
             logger.info(f"Worker {worker_id} shutting down")
             break
         logger.info(f"Worker {worker_id} processing tasks: {imageGenerateRequests.__len__()}")
-        inferencing_timeout = 10 + imageGenerateRequests[0].num_inference_step * 2  # seconds
+        # inferencing_timeout = 10 + imageGenerateRequests[0].num_inference_step * 2  # seconds
+        inferencing_timeout = 10 + settings.num_inference_steps * 2  # seconds
         images = None
 
         inference_successful = False

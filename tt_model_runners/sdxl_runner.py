@@ -163,7 +163,7 @@ class TTSDXLRunner(DeviceRunner):
 
         self.logger.info("Model loaded successfully")
 
-        self.runInference("Sunrise on a beach", 20)
+        self.runInference("Sunrise on a beach", 2)
 
         self.logger.info("Model warmup completed")
 

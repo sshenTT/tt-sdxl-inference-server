@@ -6,10 +6,8 @@ from fastapi import HTTPException
 from config.settings import Settings, get_settings
 from model_services.device_worker import device_worker
 from tt_model_runners.runner_fabric import get_device_runner
-from tt_model_runners.sdxl_runner import TTSDXLRunner
 from utils.helpers import log_execution_time
 from utils.logger import TTLogger
-import ttnn
 
 
 class Scheduler:
