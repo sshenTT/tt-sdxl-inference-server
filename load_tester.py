@@ -21,7 +21,7 @@ HEADERS = {
 def check_api():
     start_time = time.time()
     try:
-        response = requests.post(API_URL, json=PAYLOAD, headers=HEADERS, timeout=30)
+        response = requests.post(API_URL, json=PAYLOAD, headers=HEADERS, timeout=90)
         elapsed = time.time() - start_time
         return "ok", elapsed if response.status_code == 200 else "nok"
     except Exception as e:
